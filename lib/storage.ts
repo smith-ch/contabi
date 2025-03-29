@@ -165,7 +165,7 @@ export async function deleteFile(bucket: string, path: string): Promise<boolean>
 }
 
 /**
- * Lista los archivos en un bucket para un usuario específico
+ * Lista los archivos de un usuario en un bucket específico
  * @param bucket Bucket a consultar
  * @param userId ID del usuario
  * @returns Lista de archivos
