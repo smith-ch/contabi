@@ -1,7 +1,32 @@
-arreglar las facturas pdf o imprimir
-quitar el apartado de diagnostico
-arreglar lo del logo del perfil
-arreglar los reportes financieros pdf
-agregar el reporte 606
-hacer que las facturas no se reflejen como ganacia hasta ser marcadas como pagadas
-implementar optimizaciones
+Mejoras y correcciones para el sistema contable:
+
+Facturación PDF e impresión:
+
+Corregir problemas con la generación e impresión de facturas en PDF.
+
+Eliminar el apartado de diagnóstico en las facturas.
+
+Ajustar el diseño para mejorar la presentación y legibilidad.
+
+Reportes financieros:
+
+Corregir errores en la generación de reportes financieros en PDF.
+
+Agregar el reporte 606 a la lista de reportes disponibles.
+
+Gestión de ingresos y ganancias:
+
+Modificar el sistema para que las facturas no se reflejen como ganancia hasta ser marcadas como pagadas.
+
+Interfaz y branding:
+
+Corregir el problema con la visualización del logo en el perfil.
+
+Optimización del sistema:
+
+Implementar mejoras de rendimiento y eficiencia en el sistema.
+
+Optimizar consultas y procesos para reducir tiempos de carga.
+
+Mejorar la experiencia de usuario en la generación y manejo de documentos contables.
+
