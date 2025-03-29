@@ -60,7 +60,7 @@ export default function InvoicesPage() {
 
         const userData = JSON.parse(storedUser)
 
-        // Cargar facturas
+        // Cargar facturas usando Supabase
         const userInvoices = await getInvoicesByUserId(userData.id)
         setInvoices(userInvoices)
         setFilteredInvoices(userInvoices)
@@ -137,6 +137,7 @@ export default function InvoicesPage() {
 
     try {
       setIsDeleting(true)
+      // Usar la función de Supabase para eliminar la factura
       await deleteInvoice(invoiceToDelete.id)
 
       // Actualizar estado local

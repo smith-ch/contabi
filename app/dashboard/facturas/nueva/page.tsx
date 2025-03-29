@@ -32,12 +32,13 @@ export default function NewInvoicePage() {
     dueDate: getNextDueDate(new Date()).toISOString().split("T")[0],
     items: [{ id: "1", description: "", quantity: 1, price: 0, taxable: true, amount: 0 }] as InvoiceItem[],
     subtotal: 0,
-    taxRate: 0.18, // ITBIS estándar en República Dominicana (18%)
+    taxRate: 0.18,
     taxAmount: 0,
     total: 0,
-    status: "pending",
+    status: "pending" as "pending" | "paid" | "overdue" | "cancelled", // <-- Asegurar tipo
     notes: "",
   })
+  
 
   useEffect(() => {
     const loadData = async () => {
@@ -203,7 +204,7 @@ export default function NewInvoicePage() {
       toast({
         title: "Factura creada",
         description: "La factura ha sido creada exitosamente",
-        variant: "success",
+        
       })
 
       router.push("/dashboard/facturas")

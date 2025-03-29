@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/components/ui/use-toast"
+// Asegurarnos de que estamos importando desde el archivo correcto
 import { getExpensesByUserId, createExpense, updateExpense, deleteExpense, type Expense } from "@/lib/db"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { Edit, MoreHorizontal, PlusCircle, Search, Trash } from "lucide-react"
@@ -175,7 +176,6 @@ export default function ExpensesPage() {
           description: formData.description,
           amount: Number.parseFloat(formData.amount),
           date: new Date(formData.date),
-          createdAt: new Date(),
         })
 
         setExpenses([...expenses, newExpense])

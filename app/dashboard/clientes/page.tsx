@@ -25,6 +25,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/components/ui/use-toast"
+// Asegurarnos de que estamos importando desde el archivo correcto
 import { getClientsByUserId, createClient, updateClient, deleteClient, type Client } from "@/lib/db"
 import { Edit, MoreHorizontal, Search, Trash, UserPlus } from "lucide-react"
 
@@ -135,12 +136,30 @@ export default function ClientsPage() {
 
     try {
       const storedUser = localStorage.getItem("currentUser")
-      if (!storedUser) return
+      if (!storedUser) {
+        toast({
+          title: "Error",
+          description: "No se encontró información del usuario",
+          variant: "destructive",
+        })
+        return
+      }
 
       const userData = JSON.parse(storedUser)
+      console.log("Datos del usuario:", userData)
+
+      if (!userData.id) {
+        toast({
+          title: "Error",
+          description: "ID de usuario no encontrado",
+          variant: "destructive",
+        })
+        return
+      }
 
       if (currentClient) {
         // Actualizar cliente existente
+        console.log("Actualizando cliente:", currentClient.id)
         const updatedClient = await updateClient({
           ...currentClient,
           name: formData.name,
@@ -158,15 +177,19 @@ export default function ClientsPage() {
         })
       } else {
         // Crear nuevo cliente
-        const newClient = await createClient({
+        console.log("Creando nuevo cliente para usuario:", userData.id)
+        const clientData = {
           userId: userData.id,
           name: formData.name,
           rnc: formData.rnc,
           address: formData.address,
           email: formData.email,
           phone: formData.phone,
-          createdAt: new Date(),
-        })
+        }
+
+        console.log("Datos del cliente a crear:", clientData)
+        const newClient = await createClient(clientData)
+        console.log("Cliente creado:", newClient)
 
         setClients([...clients, newClient])
 
@@ -178,10 +201,10 @@ export default function ClientsPage() {
 
       setIsDialogOpen(false)
     } catch (error) {
-      console.error("Error al guardar cliente:", error)
+      console.error("Error completo al guardar cliente:", error)
       toast({
         title: "Error",
-        description: "Ocurrió un error al guardar el cliente",
+        description: error instanceof Error ? error.message : "Ocurrió un error al guardar el cliente",
         variant: "destructive",
       })
     }

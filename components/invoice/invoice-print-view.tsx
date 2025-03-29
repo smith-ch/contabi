@@ -1,314 +1,167 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useTheme } from "next-themes"
-import type { Invoice, Client, User } from "@/lib/db"
+import { getInvoiceById, getClientById, type Invoice, type Client } from "@/lib/db"
+import { getFileUrl, STORAGE_BUCKETS } from "@/lib/storage"
 import { formatCurrency, formatDate } from "@/lib/utils"
-import { QRCodeSVG } from "qrcode.react"
+import Image from "next/image"
 
 interface InvoicePrintViewProps {
-  invoice: Invoice
-  client: Client
-  user: User
+  invoiceId: string
 }
 
-export function InvoicePrintView({ invoice, client, user }: InvoicePrintViewProps) {
-  const { resolvedTheme } = useTheme()
-  const isDarkMode = resolvedTheme === "dark"
-
-  const [config, setConfig] = useState({
-    logo: "",
-    primaryColor: "#4f46e5",
-    secondaryColor: "#e5e7eb",
-    showLogo: true,
-    showFooter: true,
-    footerText:
-      "Gracias por su preferencia. Este documento es una factura fiscal válida según las regulaciones de la República Dominicana.",
-    showSignature: false,
-    signatureText: "Firma autorizada",
-    showWatermark: false,
-    watermarkText: "PAGADO",
-    showQRCode: false,
-  })
+export function InvoicePrintView({ invoiceId }: InvoicePrintViewProps) {
+  const [invoice, setInvoice] = useState<Invoice | null>(null)
+  const [client, setClient] = useState<Client | null>(null)
+  const [user, setUser] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [logoUrl, setLogoUrl] = useState<string | null>(null)
 
   useEffect(() => {
-    // Cargar configuración guardada
-    const savedConfig = localStorage.getItem("invoiceTemplateConfig")
-    if (savedConfig) {
-      setConfig(JSON.parse(savedConfig))
-    }
-  }, [])
+    const loadData = async () => {
+      try {
+        // Cargar datos del usuario
+        const storedUser = localStorage.getItem("currentUser")
+        if (storedUser) {
+          const userData = JSON.parse(storedUser)
+          setUser(userData)
 
-  // Calcular la base imponible (solo los items taxable)
-  const taxableAmount = invoice.items.filter((item) => item.taxable).reduce((sum, item) => sum + item.amount, 0)
-
-  // Generar datos para el código QR
-  const qrData = JSON.stringify({
-    invoice: invoice.invoiceNumber,
-    date: formatDate(invoice.date),
-    client: client.name,
-    rnc: client.rnc,
-    total: invoice.total,
-    currency: "RD$",
-  })
-
-  return (
-    <div className={`relative ${isDarkMode ? "text-white" : "text-black"}`}>
-      <style jsx global>{`
-        @media print {
-          @page {
-            size: letter;
-            margin: 1cm;
-          }
-          body {
-            print-color-adjust: exact;
-            -webkit-print-color-adjust: exact;
-            color: black !important;
-            background: white !important;
-          }
-          .print-white {
-            color: black !important;
-            background: white !important;
-          }
-          .print-black {
-            color: black !important;
+          // Cargar logo si existe
+          if (userData.logo) {
+            const url = await getFileUrl(STORAGE_BUCKETS.LOGOS, userData.logo)
+            setLogoUrl(url)
           }
         }
-      `}</style>
 
-      {/* Marca de agua */}
-      {config.showWatermark && invoice.status === "paid" && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div
-            className="transform rotate-45 text-6xl font-bold opacity-10"
-            style={{ color: isDarkMode ? `${config.primaryColor}80` : config.primaryColor }}
-          >
-            {config.watermarkText}
+        // Cargar factura
+        const invoiceData = await getInvoiceById(invoiceId)
+        if (invoiceData) {
+          setInvoice(invoiceData)
+
+          // Cargar cliente
+          const clientData = await getClientById(invoiceData.clientId)
+          if (clientData) {
+            setClient(clientData)
+          }
+        }
+      } catch (error) {
+        console.error("Error al cargar datos para impresión:", error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadData()
+  }, [invoiceId])
+
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center p-8">
+        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-blue-800"></div>
+      </div>
+    )
+  }
+
+  if (!invoice || !client || !user) {
+    return (
+      <div className="flex h-full items-center justify-center p-8">
+        <p className="text-red-500">No se pudo cargar la información de la factura</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-white p-8 max-w-4xl mx-auto">
+      {/* Encabezado */}
+      <div className="flex justify-between items-start mb-8">
+        <div>
+          {logoUrl ? (
+            <div className="h-20 w-40 relative mb-2">
+              <Image src={logoUrl || "/placeholder.svg"} alt={user.company || "Logo"} fill className="object-contain" />
+            </div>
+          ) : (
+            <h1 className="text-2xl font-bold text-gray-800">{user.company || "Mi Empresa"}</h1>
+          )}
+          <p className="text-gray-600">{user.name}</p>
+          <p className="text-gray-600">RNC: {user.rnc}</p>
+          {user.address && <p className="text-gray-600">{user.address}</p>}
+          {user.phone && <p className="text-gray-600">{user.phone}</p>}
+        </div>
+        <div className="text-right">
+          <h2 className="text-xl font-bold text-gray-800 mb-1">FACTURA</h2>
+          <p className="text-gray-600">#{invoice.invoiceNumber}</p>
+          <p className="text-gray-600">Fecha: {formatDate(invoice.date)}</p>
+          <p className="text-gray-600">Vencimiento: {formatDate(invoice.dueDate)}</p>
+          <div className="mt-2 inline-block px-2 py-1 rounded-md bg-gray-100 text-gray-800">
+            {invoice.status === "paid" && "PAGADA"}
+            {invoice.status === "pending" && "PENDIENTE"}
+            {invoice.status === "overdue" && "VENCIDA"}
+            {invoice.status === "cancelled" && "CANCELADA"}
           </div>
+        </div>
+      </div>
+
+      {/* Información del cliente */}
+      <div className="mb-8 p-4 bg-gray-50 rounded-md">
+        <h3 className="text-sm font-semibold text-gray-500 mb-2">FACTURAR A</h3>
+        <p className="font-medium">{client.name}</p>
+        <p className="text-gray-600">RNC: {client.rnc}</p>
+        {client.address && <p className="text-gray-600">{client.address}</p>}
+        {client.email && <p className="text-gray-600">{client.email}</p>}
+        {client.phone && <p className="text-gray-600">{client.phone}</p>}
+      </div>
+
+      {/* Tabla de items */}
+      <table className="w-full mb-8">
+        <thead>
+          <tr className="border-b border-gray-200">
+            <th className="py-2 text-left text-gray-600">Descripción</th>
+            <th className="py-2 text-right text-gray-600">Cantidad</th>
+            <th className="py-2 text-right text-gray-600">Precio</th>
+            <th className="py-2 text-right text-gray-600">Importe</th>
+          </tr>
+        </thead>
+        <tbody>
+          {invoice.items.map((item, index) => (
+            <tr key={index} className="border-b border-gray-100">
+              <td className="py-3 text-gray-800">{item.description}</td>
+              <td className="py-3 text-right text-gray-800">{item.quantity}</td>
+              <td className="py-3 text-right text-gray-800">{formatCurrency(item.price)}</td>
+              <td className="py-3 text-right text-gray-800">{formatCurrency(item.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Totales */}
+      <div className="flex justify-end mb-8">
+        <div className="w-64">
+          <div className="flex justify-between py-2 border-b border-gray-100">
+            <span className="text-gray-600">Subtotal</span>
+            <span className="font-medium">{formatCurrency(invoice.subtotal)}</span>
+          </div>
+          <div className="flex justify-between py-2 border-b border-gray-100">
+            <span className="text-gray-600">ITBIS ({(invoice.taxRate * 100).toFixed(0)}%)</span>
+            <span className="font-medium">{formatCurrency(invoice.taxAmount)}</span>
+          </div>
+          <div className="flex justify-between py-3 font-bold">
+            <span>Total</span>
+            <span>{formatCurrency(invoice.total)}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Notas */}
+      {invoice.notes && (
+        <div className="mb-8">
+          <h3 className="text-sm font-semibold text-gray-500 mb-2">NOTAS</h3>
+          <p className="text-gray-600">{invoice.notes}</p>
         </div>
       )}
 
-      <div className="relative print-white">
-        {/* Encabezado */}
-        <div className="mb-8 flex justify-between">
-          <div className="max-w-[50%]">
-            {config.showLogo && config.logo && (
-              <div className="mb-3 max-h-20">
-                <img src={config.logo || "/placeholder.svg"} alt="Logo" className="h-16 object-contain" />
-              </div>
-            )}
-            <h1
-              className="text-xl font-bold print-black"
-              style={{ color: isDarkMode ? `${config.primaryColor}FF` : config.primaryColor }}
-            >
-              {user.company}
-            </h1>
-            <p className={isDarkMode ? "text-gray-300" : "text-gray-700"}>{user.address || "DOM"}</p>
-            <p className={isDarkMode ? "text-gray-300" : "text-gray-700"}>{user.phone || ""}</p>
-            <p className={isDarkMode ? "text-gray-300" : "text-gray-700"}>{user.email}</p>
-            <p className={isDarkMode ? "text-gray-300" : "text-gray-700"}>RNC: {user.rnc}</p>
-          </div>
-          <div className="text-right">
-            <h2
-              className="text-xl font-bold mb-2 print-black"
-              style={{ color: isDarkMode ? `${config.primaryColor}FF` : config.primaryColor }}
-            >
-              Factura de Impuestos
-            </h2>
-            <div className="space-y-1">
-              <div className="flex justify-between gap-4">
-                <span className={isDarkMode ? "font-medium text-gray-400" : "font-medium text-gray-500"}>
-                  FACTURA N.°
-                </span>
-                <span className="print-black">{invoice.invoiceNumber}</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className={isDarkMode ? "font-medium text-gray-400" : "font-medium text-gray-500"}>FECHA</span>
-                <span className="print-black">{formatDate(invoice.date)}</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className={isDarkMode ? "font-medium text-gray-400" : "font-medium text-gray-500"}>
-                  CONDICIONES
-                </span>
-                <span className="print-black">
-                  Pago en {Math.round((invoice.dueDate.getTime() - invoice.date.getTime()) / (1000 * 60 * 60 * 24))}{" "}
-                  días
-                </span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className={isDarkMode ? "font-medium text-gray-400" : "font-medium text-gray-500"}>
-                  FECHA DE VENCIMIENTO
-                </span>
-                <span className="print-black">{formatDate(invoice.dueDate)}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Información del cliente */}
-        <div className="mb-8">
-          <h3 className={`mb-2 font-medium uppercase ${isDarkMode ? "text-gray-400" : "text-gray-500"}`}>FACTURAR A</h3>
-          <p className="font-medium print-black">{client.name}</p>
-          <p className={isDarkMode ? "text-gray-300" : "text-gray-700"}>{client.rnc}</p>
-          <p className={isDarkMode ? "text-gray-300" : "text-gray-700"}>{client.address}</p>
-          <p className={isDarkMode ? "text-gray-300" : "text-gray-700"}>{client.email}</p>
-          <p className={isDarkMode ? "text-gray-300" : "text-gray-700"}>{client.phone}</p>
-        </div>
-
-        {/* Tabla de items */}
-        <div className="mb-8 overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr
-                style={{
-                  backgroundColor: isDarkMode ? `${config.secondaryColor}20` : config.secondaryColor,
-                }}
-              >
-                <th
-                  className={`border-b p-2 text-left font-medium ${isDarkMode ? "border-gray-700" : "border-gray-200"} print-black`}
-                >
-                  FECHA
-                </th>
-                <th
-                  className={`border-b p-2 text-left font-medium ${isDarkMode ? "border-gray-700" : "border-gray-200"} print-black`}
-                >
-                  SERVICIO
-                </th>
-                <th
-                  className={`border-b p-2 text-left font-medium ${isDarkMode ? "border-gray-700" : "border-gray-200"} print-black`}
-                >
-                  DESCRIPCIÓN
-                </th>
-                <th
-                  className={`border-b p-2 text-center font-medium ${isDarkMode ? "border-gray-700" : "border-gray-200"} print-black`}
-                >
-                  CANT.
-                </th>
-                <th
-                  className={`border-b p-2 text-right font-medium ${isDarkMode ? "border-gray-700" : "border-gray-200"} print-black`}
-                >
-                  TASA
-                </th>
-                <th
-                  className={`border-b p-2 text-right font-medium ${isDarkMode ? "border-gray-700" : "border-gray-200"} print-black`}
-                >
-                  IMPORTE
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoice.items.map((item, index) => (
-                <tr key={item.id} className={`border-b ${isDarkMode ? "border-gray-700" : "border-gray-200"}`}>
-                  <td className="p-2 print-black">{formatDate(invoice.date)}</td>
-                  <td className="p-2 print-black">Servicio</td>
-                  <td className="p-2 print-black">{item.description}</td>
-                  <td className="p-2 text-center print-black">{item.quantity}</td>
-                  <td className="p-2 text-right print-black">{formatCurrency(item.price)}</td>
-                  <td className="p-2 text-right print-black">{formatCurrency(item.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Totales */}
-        <div className="mb-8 flex justify-end">
-          <div className="w-64 space-y-2">
-            <div className={`flex justify-between border-b py-1 ${isDarkMode ? "border-gray-700" : "border-gray-200"}`}>
-              <span className="print-black">SUBTOTAL</span>
-              <span className="print-black">{formatCurrency(invoice.subtotal)}</span>
-            </div>
-            <div className={`flex justify-between border-b py-1 ${isDarkMode ? "border-gray-700" : "border-gray-200"}`}>
-              <span className="print-black">IMPUESTO ({invoice.taxRate * 100}%)</span>
-              <span className="print-black">{formatCurrency(invoice.taxAmount)}</span>
-            </div>
-            <div className="flex justify-between py-1 text-lg font-bold print-black">
-              <span>TOTAL</span>
-              <span>{formatCurrency(invoice.total)}</span>
-            </div>
-            <div
-              className="flex justify-between py-1 text-lg font-bold print-black"
-              style={{ color: isDarkMode ? `${config.primaryColor}FF` : config.primaryColor }}
-            >
-              <span>SALDO PENDIENTE</span>
-              <span>RD${formatCurrency(invoice.total).replace("RD$", "")}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Resumen de impuestos */}
-        <div className="mb-8">
-          <h3 className={`mb-2 font-medium uppercase ${isDarkMode ? "text-gray-400" : "text-gray-500"}`}>
-            RESUMEN DE IMPUESTOS
-          </h3>
-          <table className="w-full border-collapse">
-            <thead>
-              <tr
-                style={{
-                  backgroundColor: isDarkMode ? `${config.secondaryColor}20` : config.secondaryColor,
-                }}
-              >
-                <th
-                  className={`border-b p-2 text-center font-medium ${isDarkMode ? "border-gray-700" : "border-gray-200"} print-black`}
-                >
-                  TASA
-                </th>
-                <th
-                  className={`border-b p-2 text-center font-medium ${isDarkMode ? "border-gray-700" : "border-gray-200"} print-black`}
-                >
-                  IMPUESTOS DE
-                </th>
-                <th
-                  className={`border-b p-2 text-center font-medium ${isDarkMode ? "border-gray-700" : "border-gray-200"} print-black`}
-                >
-                  BASE IMPONIBLE
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className={`border-b ${isDarkMode ? "border-gray-700" : "border-gray-200"}`}>
-                <td className="p-2 text-center print-black">ITBIS de {invoice.taxRate * 100}%</td>
-                <td className="p-2 text-center print-black">{formatCurrency(invoice.taxAmount)}</td>
-                <td className="p-2 text-center print-black">{formatCurrency(taxableAmount)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        {/* Firma */}
-        {config.showSignature && (
-          <div className="mb-8 flex justify-end">
-            <div className="w-64 text-center">
-              <div className={`border-t pt-2 ${isDarkMode ? "border-gray-700" : "border-gray-400"} print-black`}>
-                {config.signatureText}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Pie de página */}
-        {config.showFooter && (
-          <div className={`text-center text-sm ${isDarkMode ? "text-gray-400" : "text-gray-500"}`}>
-            <p className="whitespace-pre-line print-black">{config.footerText}</p>
-          </div>
-        )}
-
-        {/* Código QR */}
-        {config.showQRCode && (
-          <div className="absolute bottom-0 right-0 p-4">
-            <QRCodeSVG
-              value={qrData}
-              size={80}
-              bgColor={isDarkMode ? "#1f2937" : "#ffffff"}
-              fgColor={isDarkMode ? "#ffffff" : "#000000"}
-            />
-          </div>
-        )}
-
-        {/* Número de página */}
-        <div className={`mt-8 text-center text-xs ${isDarkMode ? "text-gray-500" : "text-gray-400"} print-black`}>
-          Page 1 of 1
-        </div>
+      {/* Pie de página */}
+      <div className="text-center text-gray-500 text-sm mt-16 pt-4 border-t border-gray-200">
+        <p>Gracias por su preferencia</p>
       </div>
     </div>
   )

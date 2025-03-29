@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { Badge } from "@/components/ui/badge"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { useToast } from "@/components/ui/use-toast"
+// Asegurarnos de que estamos importando desde el archivo correcto
 import { updateInvoice, type Invoice, type Client } from "@/lib/db"
 import {
   DndContext,
@@ -94,6 +95,7 @@ export function InvoiceKanban({ invoices, clients, onInvoiceUpdate }: InvoiceKan
       if (invoiceToUpdate && invoiceToUpdate.status !== newStatus) {
         try {
           const updatedInvoice = { ...invoiceToUpdate, status: newStatus }
+          // Usar la función de Supabase para actualizar la factura
           await updateInvoice(updatedInvoice)
 
           // Actualizar estado local
@@ -115,7 +117,7 @@ export function InvoiceKanban({ invoices, clients, onInvoiceUpdate }: InvoiceKan
           toast({
             title: "Estado actualizado",
             description: `La factura #${invoiceToUpdate.invoiceNumber} ha sido movida a ${getStatusText(newStatus)}`,
-            variant: "success",
+            
           })
         } catch (error) {
           console.error("Error al actualizar estado:", error)

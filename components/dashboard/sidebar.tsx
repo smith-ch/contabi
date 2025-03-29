@@ -4,7 +4,19 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { BarChart3, FileText, Home, Receipt, Settings, Users, FileUp, Palette, HelpCircle } from "lucide-react"
+import {
+  BarChart3,
+  FileText,
+  Home,
+  Receipt,
+  Settings,
+  Users,
+  FileUp,
+  Palette,
+  HelpCircle,
+  Database,
+  RefreshCw,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { motion } from "framer-motion"
 
@@ -35,6 +47,7 @@ export function Sidebar() {
     }
   }, [])
 
+  // Añadir un nuevo elemento al array navItems para el diagnóstico
   const navItems = [
     { href: "/dashboard", label: "Inicio", icon: Home },
     { href: "/dashboard/facturas", label: "Facturas", icon: FileText },
@@ -51,6 +64,16 @@ export function Sidebar() {
       ],
     },
     { href: "/dashboard/ayuda", label: "Ayuda", icon: HelpCircle },
+    // Añadir este nuevo elemento
+    {
+      href: "/dashboard/diagnostico",
+      label: "Diagnóstico",
+      icon: Database,
+      subItems: [
+        { href: "/dashboard/diagnostico", label: "Verificar Tablas" },
+        { href: "/dashboard/diagnostico/corregir-db", label: "Corregir Base de Datos", icon: RefreshCw },
+      ],
+    },
   ]
 
   if (!isOpen) {
