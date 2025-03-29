@@ -2,25 +2,28 @@
 
 import type React from "react"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { uploadFile, getFileUrl, deleteFile } from "@/lib/storage"
-import { useToast } from "@/components/ui/use-toast"
-import { Loader2, Upload, X, FileIcon } from "lucide-react"
+import { Progress } from "@/components/ui/progress"
+import { uploadFile, deleteFile, ALLOWED_FILE_TYPES, FILE_SIZE_LIMITS } from "@/lib/storage"
+import { Upload, X, FileIcon, AlertCircle } from "lucide-react"
+import Image from "next/image"
+import { cn } from "@/lib/utils"
 
-interface FileUploadProps {
+export interface FileUploadProps {
   bucket: string
   userId: string
-  onFileUploaded: (filePath: string, fileUrl: string) => void
+  onFileUploaded?: (path: string, url: string) => void
   onFileDeleted?: () => void
-  existingFilePath?: string
-  accept?: string
-  maxSizeMB?: number
+  initialFilePath?: string
+  initialFileUrl?: string
+  allowedTypes?: string[]
+  maxSizeBytes?: number
   className?: string
   label?: string
-  buttonText?: string
+  showPreview?: boolean
+  previewSize?: "small" | "medium" | "large"
+  variant?: "default" | "outline" | "compact"
 }
 
 export function FileUpload({
@@ -28,235 +31,181 @@ export function FileUpload({
   userId,
   onFileUploaded,
   onFileDeleted,
-  existingFilePath,
-  accept = "*",
-  maxSizeMB = 5,
-  className = "",
-  label = "Archivo",
-  buttonText = "Subir archivo",
+  initialFilePath,
+  initialFileUrl,
+  allowedTypes = ALLOWED_FILE_TYPES.ALL,
+  maxSizeBytes = FILE_SIZE_LIMITS.ATTACHMENT,
+  className,
+  label = "Subir archivo",
+  showPreview = true,
+  previewSize = "medium",
+  variant = "default",
 }: FileUploadProps) {
-  const [isUploading, setIsUploading] = useState(false)
-  const [isDeleting, setIsDeleting] = useState(false)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [filePath, setFilePath] = useState<string | null>(initialFilePath || null)
+  const [fileUrl, setFileUrl] = useState<string | null>(initialFileUrl || null)
   const [fileName, setFileName] = useState<string | null>(null)
-  // Nuevo estado para identificar si el archivo es una imagen
-  const [fileIsImage, setFileIsImage] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const { toast } = useToast()
 
-  // Función para verificar si el archivo es imagen
-  const isImage = (file: File) => {
-    return file.type.startsWith("image/")
-  }
-
-  // Formatea el tamaño del archivo
-  const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return bytes + " bytes"
-    else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB"
-    else return (bytes / 1048576).toFixed(1) + " MB"
-  }
-
-  // Cargar archivo existente si está disponible
-  const loadExistingFile = async () => {
-    if (existingFilePath) {
-      try {
-        const url = await getFileUrl(bucket, existingFilePath)
-        if (url) {
-          setPreviewUrl(url)
-          // Extraer nombre de archivo a partir de la ruta
-          const fileName = existingFilePath.split("/").pop() || "archivo"
-          setFileName(fileName)
-          // Opcional: determinar si es imagen a partir de la extensión
-          const extension = fileName.split(".").pop()?.toLowerCase() || ""
-          const imageExtensions = ["jpg", "jpeg", "png", "gif", "webp", "bmp"]
-          setFileIsImage(imageExtensions.includes(extension))
-        }
-      } catch (error) {
-        console.error("Error loading existing file:", error)
+  // Simular progreso de carga
+  const simulateProgress = useCallback(() => {
+    let progress = 0
+    const interval = setInterval(() => {
+      progress += Math.random() * 10
+      if (progress > 95) {
+        clearInterval(interval)
+        progress = 95
       }
-    }
-  }
-
-  // Llama a loadExistingFile cuando cambie existingFilePath
-  useState(() => {
-    loadExistingFile()
-  })
+      setUploadProgress(progress)
+    }, 300)
+    return () => clearInterval(interval)
+  }, [])
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
-    // Verificar tamaño del archivo
-    const maxSizeBytes = maxSizeMB * 1024 * 1024
-    if (file.size > maxSizeBytes) {
-      toast({
-        title: "Error",
-        description: `El archivo es demasiado grande. El tamaño máximo es ${maxSizeMB}MB.`,
-        variant: "destructive",
-      })
+    // Validar tipo de archivo
+    if (!allowedTypes.includes(file.type)) {
+      setError(
+        `Tipo de archivo no permitido. Tipos permitidos: ${allowedTypes.map((type) => type.split("/")[1]).join(", ")}`,
+      )
       return
     }
 
+    // Validar tamaño de archivo
+    if (file.size > maxSizeBytes) {
+      setError(`El archivo es demasiado grande. Tamaño máximo: ${maxSizeBytes / (1024 * 1024)}MB`)
+      return
+    }
+
+    setError(null)
     setIsUploading(true)
+    setFileName(file.name)
+
+    // Iniciar simulación de progreso
+    const stopProgress = simulateProgress()
 
     try {
-      // Generar un nombre único para el archivo
-      const timestamp = new Date().getTime()
-      const extension = file.name.split(".").pop() || ""
-      const uniqueFileName = `${timestamp}.${extension}`
+      const result = await uploadFile(file, bucket, userId)
+      setFilePath(result.path)
+      setFileUrl(result.url)
+      setUploadProgress(100)
 
-      // Subir el archivo
-      const filePath = await uploadFile(bucket, uniqueFileName, file, userId)
-
-      if (filePath) {
-        // Obtener la URL pública
-        const fileUrl = await getFileUrl(bucket, filePath)
-
-        if (fileUrl) {
-          // Si es imagen, establece la URL de vista previa
-          if (isImage(file)) {
-            setPreviewUrl(fileUrl)
-            setFileIsImage(true)
-          } else {
-            setPreviewUrl(null)
-            setFileIsImage(false)
-          }
-
-          setFileName(file.name)
-
-          // Notifica al componente padre
-          onFileUploaded(filePath, fileUrl)
-
-          toast({
-            title: "Archivo subido",
-            description: "El archivo se ha subido correctamente.",
-          })
-        }
-      } else {
-        toast({
-          title: "Error",
-          description: "No se pudo subir el archivo. Inténtelo de nuevo.",
-          variant: "destructive",
-        })
+      if (onFileUploaded) {
+        onFileUploaded(result.path, result.url)
       }
-    } catch (error) {
-      console.error("Error uploading file:", error)
-      toast({
-        title: "Error",
-        description: "Ocurrió un error al subir el archivo.",
-        variant: "destructive",
-      })
+    } catch (err) {
+      console.error("Error al subir archivo:", err)
+      setError("Error al subir el archivo. Intente nuevamente.")
     } finally {
+      stopProgress()
       setIsUploading(false)
     }
   }
 
   const handleDelete = async () => {
-    if (!existingFilePath) return
-
-    setIsDeleting(true)
+    if (!filePath) return
 
     try {
-      const success = await deleteFile(bucket, existingFilePath)
+      await deleteFile(bucket, filePath)
+      setFilePath(null)
+      setFileUrl(null)
+      setFileName(null)
 
-      if (success) {
-        setPreviewUrl(null)
-        setFileName(null)
-        setFileIsImage(false)
-
-        // Reinicia el input
-        if (fileInputRef.current) {
-          fileInputRef.current.value = ""
-        }
-
-        // Notifica al componente padre
-        if (onFileDeleted) {
-          onFileDeleted()
-        }
-
-        toast({
-          title: "Archivo eliminado",
-          description: "El archivo se ha eliminado correctamente.",
-        })
-      } else {
-        toast({
-          title: "Error",
-          description: "No se pudo eliminar el archivo. Inténtelo de nuevo.",
-          variant: "destructive",
-        })
+      if (onFileDeleted) {
+        onFileDeleted()
       }
-    } catch (error) {
-      console.error("Error deleting file:", error)
-      toast({
-        title: "Error",
-        description: "Ocurrió un error al eliminar el archivo.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsDeleting(false)
+    } catch (err) {
+      console.error("Error al eliminar archivo:", err)
+      setError("Error al eliminar el archivo.")
     }
   }
 
-  return (
-    <div className={className}>
-      <Label htmlFor="file-upload">{label}</Label>
+  const triggerFileInput = () => {
+    fileInputRef.current?.click()
+  }
 
-      {/* Vista previa del archivo o botón de subir */}
-      <div className="mt-2">
-        {previewUrl && fileIsImage ? (
-          <div className="relative rounded-md border overflow-hidden">
-            <img src={previewUrl || "/placeholder.svg"} alt="Preview" className="max-h-40 w-auto object-contain" />
-            <Button
-              type="button"
-              variant="destructive"
-              size="icon"
-              className="absolute top-2 right-2 h-6 w-6 rounded-full opacity-80 hover:opacity-100"
-              onClick={handleDelete}
-              disabled={isDeleting}
-            >
-              {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-            </Button>
+  // Determinar si el archivo es una imagen
+  const isImage = fileUrl && /\.(jpg|jpeg|png|gif|webp)$/i.test(fileUrl)
+
+  // Tamaños de previsualización
+  const previewSizes = {
+    small: "h-16 w-16",
+    medium: "h-24 w-24",
+    large: "h-32 w-32",
+  }
+
+  return (
+    <div className={cn("space-y-2", className)}>
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        className="hidden"
+        accept={allowedTypes.join(",")}
+      />
+
+      {error && (
+        <div className="flex items-center text-red-500 text-sm mb-2">
+          <AlertCircle className="h-4 w-4 mr-1" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {isUploading && (
+        <div className="space-y-2">
+          <div className="flex items-center text-sm text-muted-foreground">
+            <span className="truncate max-w-[200px]">{fileName}</span>
           </div>
-        ) : fileName ? (
-          <div className="flex items-center justify-between rounded-md border p-3">
-            <div className="flex items-center gap-2">
-              <FileIcon className="h-5 w-5 text-primary" />
-              <span className="text-sm truncate max-w-[200px]">{fileName}</span>
+          <Progress value={uploadProgress} className="h-2" />
+        </div>
+      )}
+
+      {fileUrl && !isUploading && showPreview && (
+        <div className="flex flex-col items-center space-y-2">
+          {isImage ? (
+            <div className={cn("relative rounded-md overflow-hidden border", previewSizes[previewSize])}>
+              <Image src={fileUrl || "/placeholder.svg"} alt="Vista previa" fill className="object-cover" />
             </div>
-            <Button
-              type="button"
-              variant="destructive"
-              size="icon"
-              className="h-6 w-6 rounded-full"
-              onClick={handleDelete}
-              disabled={isDeleting}
-            >
-              {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-            </Button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-center rounded-md border-2 border-dashed p-6">
-            <label htmlFor="file-upload" className="flex flex-col items-center gap-2 cursor-pointer">
-              {isUploading ? (
-                <Loader2 className="h-8 w-8 text-primary animate-spin" />
-              ) : (
-                <Upload className="h-8 w-8 text-primary" />
+          ) : (
+            <div
+              className={cn(
+                "flex items-center justify-center rounded-md border bg-muted/20",
+                previewSizes[previewSize],
               )}
-              <span className="text-sm text-muted-foreground">{isUploading ? "Subiendo..." : buttonText}</span>
-              <span className="text-xs text-muted-foreground">Máximo {maxSizeMB}MB</span>
-            </label>
-            <Input
-              id="file-upload"
-              ref={fileInputRef}
-              type="file"
-              accept={accept}
-              onChange={handleFileChange}
-              disabled={isUploading}
-              className="hidden"
-            />
+            >
+              <FileIcon className="h-8 w-8 text-muted-foreground" />
+            </div>
+          )}
+
+          <div className="flex items-center text-sm text-muted-foreground">
+            <span className="truncate max-w-[200px]">{fileName || filePath?.split("/").pop()}</span>
           </div>
-        )}
-      </div>
+
+          <Button type="button" variant="destructive" size="sm" onClick={handleDelete} className="mt-1">
+            <X className="h-4 w-4 mr-1" /> Eliminar
+          </Button>
+        </div>
+      )}
+
+      {(!filePath || !showPreview) && !isUploading && (
+        <div className={variant === "compact" ? "inline-block" : "block"}>
+          <Button
+            type="button"
+            variant={variant === "outline" ? "outline" : "secondary"}
+            onClick={triggerFileInput}
+            className={variant === "compact" ? "h-9 px-3" : ""}
+            disabled={isUploading}
+          >
+            <Upload className={cn("mr-1", variant === "compact" ? "h-4 w-4" : "h-5 w-5")} />
+            {label}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
+

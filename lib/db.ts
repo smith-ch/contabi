@@ -421,61 +421,88 @@ export async function deleteClient(id: string): Promise<void> {
 
 // Invoice functions
 export async function createInvoice(invoiceData: Omit<Invoice, "id" | "createdAt">): Promise<Invoice> {
-  // Start a transaction
-  const { data: invoice, error: invoiceError } = await supabaseClient
-    .from("invoices")
-    .insert({
-      user_id: invoiceData.userId,
-      client_id: invoiceData.clientId,
-      invoice_number: invoiceData.invoiceNumber,
-      date: invoiceData.date.toISOString().split("T")[0],
-      due_date: invoiceData.dueDate.toISOString().split("T")[0],
-      subtotal: invoiceData.subtotal,
-      tax_rate: invoiceData.taxRate,
-      tax_amount: invoiceData.taxAmount,
-      total: invoiceData.total,
-      status: invoiceData.status,
-      notes: invoiceData.notes || null,
-    })
-    .select()
-    .single()
+  try {
+    console.log("Creando factura con datos:", JSON.stringify(invoiceData, null, 2))
 
-  if (invoiceError) {
-    console.error("Error creating invoice:", invoiceError)
-    throw new Error(`Error creating invoice: ${invoiceError.message}`)
+    // Verificar que los datos requeridos estén presentes
+    if (!invoiceData.userId) {
+      throw new Error("userId es requerido para crear una factura")
+    }
+
+    if (!invoiceData.clientId) {
+      throw new Error("clientId es requerido para crear una factura")
+    }
+
+    // Insertar la factura
+    const { data: invoice, error: invoiceError } = await supabaseClient
+      .from("invoices")
+      .insert({
+        user_id: invoiceData.userId,
+        client_id: invoiceData.clientId,
+        invoice_number: invoiceData.invoiceNumber,
+        date: invoiceData.date.toISOString().split("T")[0],
+        due_date: invoiceData.dueDate.toISOString().split("T")[0],
+        subtotal: invoiceData.subtotal,
+        tax_rate: invoiceData.taxRate,
+        tax_amount: invoiceData.taxAmount,
+        total: invoiceData.total,
+        status: invoiceData.status,
+        notes: invoiceData.notes || null,
+      })
+      .select()
+      .single()
+
+    if (invoiceError) {
+      console.error("Error detallado al crear factura:", invoiceError)
+      throw new Error(`Error al crear factura: ${invoiceError.message || JSON.stringify(invoiceError)}`)
+    }
+
+    if (!invoice) {
+      throw new Error("No se recibieron datos después de crear la factura")
+    }
+
+    console.log("Factura creada exitosamente:", invoice)
+
+    // Insertar items de la factura
+    const invoiceItems = invoiceData.items.map((item) => ({
+      invoice_id: invoice.id,
+      description: item.description,
+      quantity: item.quantity,
+      price: item.price,
+      taxable: item.taxable,
+      amount: item.amount,
+    }))
+
+    const { data: items, error: itemsError } = await supabaseClient.from("invoice_items").insert(invoiceItems).select()
+
+    if (itemsError) {
+      console.error("Error detallado al crear items de factura:", itemsError)
+      // Intentar eliminar la factura si falla la creación de items
+      await supabaseClient.from("invoices").delete().eq("id", invoice.id)
+      throw new Error(`Error al crear items de factura: ${itemsError.message || JSON.stringify(itemsError)}`)
+    }
+
+    // Intentar crear notificación, pero no fallar si hay error
+    try {
+      await createNotification({
+        userId: invoiceData.userId,
+        title: "Nueva factura",
+        message: `Se ha creado la factura #${invoiceData.invoiceNumber} por ${new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" }).format(invoiceData.total)}.`,
+        type: "success",
+        relatedId: invoice.id,
+        relatedType: "invoice",
+        read: false,
+      }).catch((err) => console.warn("Error al crear notificación para factura:", err))
+    } catch (notifError) {
+      console.warn("Error al crear notificación para factura:", notifError)
+      // No interrumpir el flujo si falla la notificación
+    }
+
+    return convertInvoiceFromSupabase(invoice, items || [])
+  } catch (err) {
+    console.error("Error completo al crear factura:", err)
+    throw err instanceof Error ? err : new Error(`Error al crear factura: ${JSON.stringify(err)}`)
   }
-
-  // Insert invoice items
-  const invoiceItems = invoiceData.items.map((item) => ({
-    invoice_id: invoice.id,
-    description: item.description,
-    quantity: item.quantity,
-    price: item.price,
-    taxable: item.taxable,
-    amount: item.amount,
-  }))
-
-  const { data: items, error: itemsError } = await supabaseClient.from("invoice_items").insert(invoiceItems).select()
-
-  if (itemsError) {
-    console.error("Error creating invoice items:", itemsError)
-    // Attempt to delete the invoice if items creation fails
-    await supabaseClient.from("invoices").delete().eq("id", invoice.id)
-    throw new Error(`Error creating invoice items: ${itemsError.message}`)
-  }
-
-  // Create notification
-  await createNotification({
-    userId: invoiceData.userId,
-    title: "Nueva factura",
-    message: `Se ha creado la factura #${invoiceData.invoiceNumber} por ${new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" }).format(invoiceData.total)}.`,
-    type: "success",
-    relatedId: invoice.id,
-    relatedType: "invoice",
-    read: false,
-  })
-
-  return convertInvoiceFromSupabase(invoice, items)
 }
 
 export async function getInvoicesByUserId(userId: string): Promise<Invoice[]> {
@@ -661,29 +688,51 @@ export async function deleteInvoice(id: string): Promise<void> {
 
 // Expense functions
 export async function createExpense(expenseData: Omit<Expense, "id" | "createdAt">): Promise<Expense> {
-  const { data, error } = await supabaseClient
-    .from("expenses")
-    .insert(convertExpenseToSupabase(expenseData))
-    .select()
-    .single()
+  try {
+    console.log("Creando gasto con datos:", JSON.stringify(expenseData, null, 2))
 
-  if (error) {
-    console.error("Error creating expense:", error)
-    throw new Error(`Error creating expense: ${error.message}`)
+    // Verificar que los datos requeridos estén presentes
+    if (!expenseData.userId) {
+      throw new Error("userId es requerido para crear un gasto")
+    }
+
+    const supabaseData = convertExpenseToSupabase(expenseData)
+    console.log("Datos convertidos para Supabase:", JSON.stringify(supabaseData, null, 2))
+
+    const { data, error } = await supabaseClient.from("expenses").insert(supabaseData).select().single()
+
+    if (error) {
+      console.error("Error detallado al crear gasto:", error)
+      throw new Error(`Error al crear gasto: ${error.message || JSON.stringify(error)}`)
+    }
+
+    if (!data) {
+      throw new Error("No se recibieron datos después de crear el gasto")
+    }
+
+    console.log("Gasto creado exitosamente:", data)
+
+    // Intentar crear notificación, pero no fallar si hay error
+    try {
+      await createNotification({
+        userId: expenseData.userId,
+        title: "Nuevo gasto",
+        message: `Se ha registrado un gasto de ${new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" }).format(expenseData.amount)} en la categoría ${expenseData.category}.`,
+        type: "info",
+        relatedId: data.id,
+        relatedType: "expense",
+        read: false,
+      }).catch((err) => console.warn("Error al crear notificación para gasto:", err))
+    } catch (notifError) {
+      console.warn("Error al crear notificación para gasto:", notifError)
+      // No interrumpir el flujo si falla la notificación
+    }
+
+    return convertExpenseFromSupabase(data)
+  } catch (err) {
+    console.error("Error completo al crear gasto:", err)
+    throw err instanceof Error ? err : new Error(`Error al crear gasto: ${JSON.stringify(err)}`)
   }
-
-  // Create notification
-  await createNotification({
-    userId: expenseData.userId,
-    title: "Nuevo gasto",
-    message: `Se ha registrado un gasto de ${new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" }).format(expenseData.amount)} en la categoría ${expenseData.category}.`,
-    type: "info",
-    relatedId: data.id,
-    relatedType: "expense",
-    read: false,
-  })
-
-  return convertExpenseFromSupabase(data)
 }
 
 export async function getExpensesByUserId(userId: string): Promise<Expense[]> {
@@ -768,18 +817,46 @@ export async function deleteExpense(id: string): Promise<void> {
 export async function createNotification(
   notificationData: Omit<Notification, "id" | "createdAt">,
 ): Promise<Notification> {
-  const { data, error } = await supabaseClient
-    .from("notifications")
-    .insert(convertNotificationToSupabase(notificationData))
-    .select()
-    .single()
+  try {
+    console.log("Creando notificación con datos:", JSON.stringify(notificationData, null, 2))
 
-  if (error) {
-    console.error("Error creating notification:", error)
-    throw new Error(`Error creating notification: ${error.message}`)
+    // Verificar que los datos requeridos estén presentes
+    if (!notificationData.userId) {
+      throw new Error("userId es requerido para crear una notificación")
+    }
+
+    const supabaseData = convertNotificationToSupabase(notificationData)
+    console.log("Datos convertidos para Supabase:", JSON.stringify(supabaseData, null, 2))
+
+    const { data, error } = await supabaseClient.from("notifications").insert(supabaseData).select().single()
+
+    if (error) {
+      console.error("Error detallado al crear notificación:", error)
+      throw new Error(`Error al crear notificación: ${error.message || JSON.stringify(error)}`)
+    }
+
+    if (!data) {
+      throw new Error("No se recibieron datos después de crear la notificación")
+    }
+
+    console.log("Notificación creada exitosamente:", data)
+    return convertNotificationFromSupabase(data)
+  } catch (err) {
+    console.error("Error completo al crear notificación:", err)
+    // No lanzar el error para evitar interrumpir el flujo principal
+    // Simplemente devolver una notificación vacía
+    return {
+      id: "error",
+      userId: notificationData.userId,
+      title: notificationData.title,
+      message: notificationData.message,
+      type: notificationData.type,
+      relatedId: notificationData.relatedId,
+      relatedType: notificationData.relatedType,
+      read: notificationData.read,
+      createdAt: new Date(),
+    }
   }
-
-  return convertNotificationFromSupabase(data)
 }
 
 export async function getNotificationsByUserId(userId: string): Promise<Notification[]> {
