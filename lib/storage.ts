@@ -27,6 +27,7 @@ export const ALLOWED_FILE_TYPES = {
   ],
 }
 
+
 // Límites de tamaño de archivo (en bytes)
 export const FILE_SIZE_LIMITS = {
   LOGO: 2 * 1024 * 1024, // 2MB
