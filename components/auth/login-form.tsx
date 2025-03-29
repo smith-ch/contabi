@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/components/ui/use-toast"
-import { initializeDB, getUserByCredentials } from "@/lib/db"
+import { supabaseClient } from "@/lib/supabase"
 
 export function LoginForm() {
   const [isLoading, setIsLoading] = useState(false)
@@ -30,19 +30,80 @@ export function LoginForm() {
     setIsLoading(true)
 
     try {
-      // Inicializar la base de datos
-      await initializeDB()
+      console.log("Intentando iniciar sesión con:", formData.email)
 
-      // Verificar credenciales
-      const user = await getUserByCredentials(formData.email, formData.password)
+      // Verificar conexión con Supabase
+      const { data: connectionTest, error: connectionError } = await supabaseClient
+        .from("users")
+        .select("count")
+        .limit(1)
 
-      if (user) {
+      if (connectionError) {
+        console.error("Error de conexión con Supabase:", connectionError)
+        toast({
+          title: "Error de conexión",
+          description: "No se pudo conectar con la base de datos. Por favor, intente nuevamente.",
+          variant: "destructive",
+        })
+        setIsLoading(false)
+        return
+      }
+
+      console.log("Conexión con Supabase exitosa, verificando credenciales...")
+
+      // Verificar credenciales directamente con Supabase
+      const { data, error } = await supabaseClient
+        .from("users")
+        .select()
+        .eq("email", formData.email)
+        .eq("password", formData.password)
+        .single()
+
+      if (error) {
+        console.error("Error al verificar credenciales:", error)
+
+        if (error.code === "PGRST116") {
+          toast({
+            title: "Error de autenticación",
+            description: "Credenciales incorrectas. Por favor, intente nuevamente.",
+            variant: "destructive",
+          })
+        } else {
+          toast({
+            title: "Error",
+            description: `Error al verificar credenciales: ${error.message}`,
+            variant: "destructive",
+          })
+        }
+
+        setIsLoading(false)
+        return
+      }
+
+      if (data) {
+        console.log("Usuario autenticado correctamente:", data.email)
+
+        // Convertir el usuario de Supabase al formato de la aplicación
+        const user = {
+          id: data.id,
+          name: data.name,
+          email: data.email,
+          password: data.password, // No deberíamos almacenar esto en producción
+          company: data.company || "",
+          rnc: data.rnc || "",
+          address: data.address || undefined,
+          phone: data.phone || undefined,
+          createdAt: new Date(data.created_at),
+        }
+
         // Guardar sesión
         localStorage.setItem("currentUser", JSON.stringify(user))
 
         // Redirigir al dashboard
+        console.log("Redirigiendo al dashboard...")
         router.push("/dashboard")
       } else {
+        console.error("No se encontró el usuario pero no se devolvió un error")
         toast({
           title: "Error de autenticación",
           description: "Credenciales incorrectas. Por favor, intente nuevamente.",
@@ -50,10 +111,10 @@ export function LoginForm() {
         })
       }
     } catch (error) {
-      console.error("Error de inicio de sesión:", error)
+      console.error("Error inesperado de inicio de sesión:", error)
       toast({
         title: "Error",
-        description: "Ocurrió un error al iniciar sesión. Por favor, intente nuevamente.",
+        description: "Ocurrió un error inesperado al iniciar sesión. Por favor, intente nuevamente.",
         variant: "destructive",
       })
     } finally {

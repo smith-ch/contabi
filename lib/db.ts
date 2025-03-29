@@ -1,6 +1,6 @@
-import { v4 as uuidv4 } from "uuid"
+import { supabaseClient, supabaseAdmin, type Tables } from "./supabase"
 
-// Definición de tipos
+// Type definitions to match our existing application
 export interface User {
   id: string
   name: string
@@ -73,883 +73,910 @@ export interface Notification {
   createdAt: Date
 }
 
-// Configuración de la base de datos
-const DB_NAME = "contabilidadRD"
-const DB_VERSION = 2
-
-// Función para inicializar la base de datos
-export const initializeDB = (): Promise<IDBDatabase> => {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION)
-
-    request.onerror = (event) => {
-      reject("Error al abrir la base de datos")
-    }
-
-    request.onsuccess = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result
-      resolve(db)
-    }
-
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result
-      const oldVersion = event.oldVersion
-
-      // Crear almacén de usuarios si no existe
-      if (!db.objectStoreNames.contains("users")) {
-        const usersStore = db.createObjectStore("users", { keyPath: "id" })
-        usersStore.createIndex("email", "email", { unique: true })
-      }
-
-      // Crear almacén de clientes si no existe
-      if (!db.objectStoreNames.contains("clients")) {
-        const clientsStore = db.createObjectStore("clients", { keyPath: "id" })
-        clientsStore.createIndex("userId", "userId", { unique: false })
-        clientsStore.createIndex("rnc", "rnc", { unique: false })
-      }
-
-      // Crear almacén de facturas si no existe
-      if (!db.objectStoreNames.contains("invoices")) {
-        const invoicesStore = db.createObjectStore("invoices", { keyPath: "id" })
-        invoicesStore.createIndex("userId", "userId", { unique: false })
-        invoicesStore.createIndex("clientId", "clientId", { unique: false })
-        invoicesStore.createIndex("invoiceNumber", "invoiceNumber", { unique: false })
-        invoicesStore.createIndex("date", "date", { unique: false })
-      }
-
-      // Crear almacén de gastos si no existe
-      if (!db.objectStoreNames.contains("expenses")) {
-        const expensesStore = db.createObjectStore("expenses", { keyPath: "id" })
-        expensesStore.createIndex("userId", "userId", { unique: false })
-        expensesStore.createIndex("date", "date", { unique: false })
-        expensesStore.createIndex("category", "category", { unique: false })
-      }
-
-      // Crear almacén de notificaciones si no existe o si estamos actualizando desde una versión anterior
-      if (oldVersion < 2) {
-        if (!db.objectStoreNames.contains("notifications")) {
-          const notificationsStore = db.createObjectStore("notifications", { keyPath: "id" })
-          notificationsStore.createIndex("userId", "userId", { unique: false })
-          notificationsStore.createIndex("read", "read", { unique: false })
-          notificationsStore.createIndex("createdAt", "createdAt", { unique: false })
-        }
-      }
-    }
-  })
+// Helper functions to convert between our application types and Supabase types
+function convertUserFromSupabase(user: Tables["users"]): User {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    password: user.password,
+    company: user.company || "",
+    rnc: user.rnc || "",
+    address: user.address || undefined,
+    phone: user.phone || undefined,
+    createdAt: new Date(user.created_at),
+  }
 }
 
-// Funciones para usuarios
-export const createUser = async (userData: Omit<User, "id">): Promise<User> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["users"], "readwrite")
-    const store = transaction.objectStore("users")
-
-    const user: User = {
-      id: uuidv4(),
-      ...userData,
-    }
-
-    const request = store.add(user)
-
-    request.onsuccess = () => {
-      resolve(user)
-    }
-
-    request.onerror = () => {
-      reject("Error al crear el usuario")
-    }
-  })
+function convertUserToSupabase(user: Omit<User, "id" | "createdAt">): Omit<Tables["users"], "id" | "created_at"> {
+  return {
+    name: user.name,
+    email: user.email,
+    password: user.password,
+    company: user.company || null,
+    rnc: user.rnc || null,
+    address: user.address || null,
+    phone: user.phone || null,
+  }
 }
 
-export const getUserByEmail = async (email: string): Promise<User | null> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["users"], "readonly")
-    const store = transaction.objectStore("users")
-    const index = store.index("email")
-
-    const request = index.get(email)
-
-    request.onsuccess = () => {
-      resolve(request.result || null)
-    }
-
-    request.onerror = () => {
-      reject("Error al buscar el usuario")
-    }
-  })
+function convertClientFromSupabase(client: Tables["clients"]): Client {
+  return {
+    id: client.id,
+    userId: client.user_id,
+    name: client.name,
+    rnc: client.rnc,
+    address: client.address || "",
+    email: client.email || "",
+    phone: client.phone || "",
+    createdAt: new Date(client.created_at),
+  }
 }
 
-export const getUserByCredentials = async (email: string, password: string): Promise<User | null> => {
-  const user = await getUserByEmail(email)
+function convertClientToSupabase(
+  client: Omit<Client, "id" | "createdAt">,
+): Omit<Tables["clients"], "id" | "created_at"> {
+  return {
+    user_id: client.userId,
+    name: client.name,
+    rnc: client.rnc,
+    address: client.address || null,
+    email: client.email || null,
+    phone: client.phone || null,
+  }
+}
 
-  if (user && user.password === password) {
-    return user
+function convertInvoiceFromSupabase(invoice: Tables["invoices"], items: Tables["invoice_items"][]): Invoice {
+  return {
+    id: invoice.id,
+    userId: invoice.user_id,
+    clientId: invoice.client_id,
+    invoiceNumber: invoice.invoice_number,
+    date: new Date(invoice.date),
+    dueDate: new Date(invoice.due_date),
+    items: items.map((item) => ({
+      id: item.id,
+      description: item.description,
+      quantity: item.quantity,
+      price: item.price,
+      taxable: item.taxable,
+      amount: item.amount,
+    })),
+    subtotal: invoice.subtotal,
+    taxRate: invoice.tax_rate,
+    taxAmount: invoice.tax_amount,
+    total: invoice.total,
+    status: invoice.status,
+    notes: invoice.notes || "",
+    createdAt: new Date(invoice.created_at),
+  }
+}
+
+function convertExpenseFromSupabase(expense: Tables["expenses"]): Expense {
+  return {
+    id: expense.id,
+    userId: expense.user_id,
+    category: expense.category,
+    description: expense.description,
+    amount: expense.amount,
+    date: new Date(expense.date),
+    receipt: expense.receipt || undefined,
+    createdAt: new Date(expense.created_at),
+  }
+}
+
+function convertExpenseToSupabase(
+  expense: Omit<Expense, "id" | "createdAt">,
+): Omit<Tables["expenses"], "id" | "created_at"> {
+  return {
+    user_id: expense.userId,
+    category: expense.category,
+    description: expense.description,
+    amount: expense.amount,
+    date: expense.date.toISOString().split("T")[0],
+    receipt: expense.receipt || null,
+  }
+}
+
+function convertNotificationFromSupabase(notification: Tables["notifications"]): Notification {
+  return {
+    id: notification.id,
+    userId: notification.user_id,
+    title: notification.title,
+    message: notification.message,
+    type: notification.type,
+    relatedId: notification.related_id || undefined,
+    relatedType: notification.related_type as "invoice" | "expense" | "client" | "system" | undefined,
+    read: notification.read,
+    createdAt: new Date(notification.created_at),
+  }
+}
+
+function convertNotificationToSupabase(
+  notification: Omit<Notification, "id" | "createdAt">,
+): Omit<Tables["notifications"], "id" | "created_at"> {
+  return {
+    user_id: notification.userId,
+    title: notification.title,
+    message: notification.message,
+    type: notification.type,
+    related_id: notification.relatedId || null,
+    related_type: notification.relatedType || null,
+    read: notification.read,
+  }
+}
+
+// User functions
+export async function createUser(userData: Omit<User, "id" | "createdAt">): Promise<User> {
+  const { data, error } = await supabaseAdmin.from("users").insert(convertUserToSupabase(userData)).select().single()
+
+  if (error) {
+    console.error("Error creating user:", error)
+    throw new Error(`Error creating user: ${error.message}`)
   }
 
-  return null
+  return convertUserFromSupabase(data)
 }
 
-export const updateUser = async (user: User): Promise<User> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["users"], "readwrite")
-    const store = transaction.objectStore("users")
+export async function getUserByEmail(email: string): Promise<User | null> {
+  const { data, error } = await supabaseClient.from("users").select().eq("email", email).single()
 
-    const request = store.put(user)
-
-    request.onsuccess = () => {
-      resolve(user)
+  if (error) {
+    if (error.code === "PGRST116") {
+      // PGRST116 means no rows returned
+      return null
     }
+    console.error("Error getting user by email:", error)
+    throw new Error(`Error getting user by email: ${error.message}`)
+  }
 
-    request.onerror = () => {
-      reject("Error al actualizar el usuario")
-    }
-  })
+  return data ? convertUserFromSupabase(data) : null
 }
 
-// Funciones para clientes
-export const createClient = async (clientData: Omit<Client, "id">): Promise<Client> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["clients"], "readwrite")
-    const store = transaction.objectStore("clients")
+export async function getUserByCredentials(email: string, password: string): Promise<User | null> {
+  // In a production app, you would use Supabase Auth instead
+  const { data, error } = await supabaseClient
+    .from("users")
+    .select()
+    .eq("email", email)
+    .eq("password", password)
+    .single()
 
-    const client: Client = {
-      id: uuidv4(),
-      ...clientData,
+  if (error) {
+    if (error.code === "PGRST116") {
+      // PGRST116 means no rows returned
+      return null
+    }
+    console.error("Error getting user by credentials:", error)
+    throw new Error(`Error getting user by credentials: ${error.message}`)
+  }
+
+  return data ? convertUserFromSupabase(data) : null
+}
+
+export async function updateUser(user: User): Promise<User> {
+  const { data, error } = await supabaseClient
+    .from("users")
+    .update({
+      name: user.name,
+      email: user.email,
+      password: user.password,
+      company: user.company || null,
+      rnc: user.rnc || null,
+      address: user.address || null,
+      phone: user.phone || null,
+    })
+    .eq("id", user.id)
+    .select()
+    .single()
+
+  if (error) {
+    console.error("Error updating user:", error)
+    throw new Error(`Error updating user: ${error.message}`)
+  }
+
+  return convertUserFromSupabase(data)
+}
+
+// Client functions
+export async function createClient(clientData: Omit<Client, "id" | "createdAt">): Promise<Client> {
+  try {
+    console.log("Intentando crear cliente con datos:", JSON.stringify(clientData, null, 2))
+
+    // Verificar que los datos requeridos estén presentes
+    if (!clientData.userId) {
+      throw new Error("userId es requerido para crear un cliente")
     }
 
-    const request = store.add(client)
+    if (!clientData.name) {
+      throw new Error("name es requerido para crear un cliente")
+    }
 
-    request.onsuccess = () => {
-      // Crear notificación
-      createNotification({
+    if (!clientData.rnc) {
+      throw new Error("rnc es requerido para crear un cliente")
+    }
+
+    const supabaseData = convertClientToSupabase(clientData)
+    console.log("Datos convertidos para Supabase:", JSON.stringify(supabaseData, null, 2))
+
+    const { data, error } = await supabaseClient.from("clients").insert(supabaseData).select().single()
+
+    if (error) {
+      console.error("Error detallado de Supabase al crear cliente:", error)
+      throw new Error(`Error creating client: ${error.message || JSON.stringify(error)}`)
+    }
+
+    if (!data) {
+      throw new Error("No se recibieron datos después de crear el cliente")
+    }
+
+    console.log("Cliente creado exitosamente:", data)
+
+    // Create notification
+    try {
+      await createNotification({
         userId: clientData.userId,
         title: "Nuevo cliente",
-        message: `Se ha creado el cliente ${client.name} exitosamente.`,
+        message: `Se ha creado el cliente ${clientData.name} exitosamente.`,
         type: "success",
-        relatedId: client.id,
+        relatedId: data.id,
         relatedType: "client",
         read: false,
-        createdAt: new Date(),
-      }).catch(console.error)
-
-      resolve(client)
+      })
+    } catch (notifError) {
+      console.error("Error al crear notificación:", notifError)
+      // No interrumpimos el flujo si falla la notificación
     }
 
-    request.onerror = () => {
-      reject("Error al crear el cliente")
+    return convertClientFromSupabase(data)
+  } catch (err) {
+    console.error("Error completo al crear cliente:", err)
+    throw err instanceof Error ? err : new Error(`Error creating client: ${JSON.stringify(err)}`)
+  }
+}
+
+export async function getClientsByUserId(userId: string): Promise<Client[]> {
+  const { data, error } = await supabaseClient.from("clients").select().eq("user_id", userId)
+
+  if (error) {
+    console.error("Error getting clients by user ID:", error)
+    throw new Error(`Error getting clients by user ID: ${error.message}`)
+  }
+
+  return data.map(convertClientFromSupabase)
+}
+
+export async function getClientById(id: string): Promise<Client | null> {
+  const { data, error } = await supabaseClient.from("clients").select().eq("id", id).single()
+
+  if (error) {
+    if (error.code === "PGRST116") {
+      // PGRST116 means no rows returned
+      return null
     }
+    console.error("Error getting client by ID:", error)
+    throw new Error(`Error getting client by ID: ${error.message}`)
+  }
+
+  return data ? convertClientFromSupabase(data) : null
+}
+
+export async function updateClient(client: Client): Promise<Client> {
+  const { data, error } = await supabaseClient
+    .from("clients")
+    .update({
+      name: client.name,
+      rnc: client.rnc,
+      address: client.address || null,
+      email: client.email || null,
+      phone: client.phone || null,
+    })
+    .eq("id", client.id)
+    .select()
+    .single()
+
+  if (error) {
+    console.error("Error updating client:", error)
+    throw new Error(`Error updating client: ${error.message}`)
+  }
+
+  // Create notification
+  await createNotification({
+    userId: client.userId,
+    title: "Cliente actualizado",
+    message: `Se ha actualizado la información del cliente ${client.name}.`,
+    type: "info",
+    relatedId: client.id,
+    relatedType: "client",
+    read: false,
+  })
+
+  return convertClientFromSupabase(data)
+}
+
+export async function deleteClient(id: string): Promise<void> {
+  // First get the client to create the notification
+  const client = await getClientById(id)
+  if (!client) {
+    throw new Error("Client not found")
+  }
+
+  const { error } = await supabaseClient.from("clients").delete().eq("id", id)
+
+  if (error) {
+    console.error("Error deleting client:", error)
+    throw new Error(`Error deleting client: ${error.message}`)
+  }
+
+  // Create notification
+  await createNotification({
+    userId: client.userId,
+    title: "Cliente eliminado",
+    message: `Se ha eliminado el cliente ${client.name}.`,
+    type: "warning",
+    relatedType: "client",
+    read: false,
   })
 }
 
-export const getClientsByUserId = async (userId: string): Promise<Client[]> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["clients"], "readonly")
-    const store = transaction.objectStore("clients")
-    const index = store.index("userId")
+// Invoice functions
+export async function createInvoice(invoiceData: Omit<Invoice, "id" | "createdAt">): Promise<Invoice> {
+  // Start a transaction
+  const { data: invoice, error: invoiceError } = await supabaseClient
+    .from("invoices")
+    .insert({
+      user_id: invoiceData.userId,
+      client_id: invoiceData.clientId,
+      invoice_number: invoiceData.invoiceNumber,
+      date: invoiceData.date.toISOString().split("T")[0],
+      due_date: invoiceData.dueDate.toISOString().split("T")[0],
+      subtotal: invoiceData.subtotal,
+      tax_rate: invoiceData.taxRate,
+      tax_amount: invoiceData.taxAmount,
+      total: invoiceData.total,
+      status: invoiceData.status,
+      notes: invoiceData.notes || null,
+    })
+    .select()
+    .single()
 
-    const request = index.getAll(userId)
+  if (invoiceError) {
+    console.error("Error creating invoice:", invoiceError)
+    throw new Error(`Error creating invoice: ${invoiceError.message}`)
+  }
 
-    request.onsuccess = () => {
-      resolve(request.result || [])
-    }
+  // Insert invoice items
+  const invoiceItems = invoiceData.items.map((item) => ({
+    invoice_id: invoice.id,
+    description: item.description,
+    quantity: item.quantity,
+    price: item.price,
+    taxable: item.taxable,
+    amount: item.amount,
+  }))
 
-    request.onerror = () => {
-      reject("Error al obtener los clientes")
-    }
+  const { data: items, error: itemsError } = await supabaseClient.from("invoice_items").insert(invoiceItems).select()
+
+  if (itemsError) {
+    console.error("Error creating invoice items:", itemsError)
+    // Attempt to delete the invoice if items creation fails
+    await supabaseClient.from("invoices").delete().eq("id", invoice.id)
+    throw new Error(`Error creating invoice items: ${itemsError.message}`)
+  }
+
+  // Create notification
+  await createNotification({
+    userId: invoiceData.userId,
+    title: "Nueva factura",
+    message: `Se ha creado la factura #${invoiceData.invoiceNumber} por ${new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" }).format(invoiceData.total)}.`,
+    type: "success",
+    relatedId: invoice.id,
+    relatedType: "invoice",
+    read: false,
   })
+
+  return convertInvoiceFromSupabase(invoice, items)
 }
 
-export const getClientById = async (id: string): Promise<Client | null> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["clients"], "readonly")
-    const store = transaction.objectStore("clients")
+export async function getInvoicesByUserId(userId: string): Promise<Invoice[]> {
+  const { data: invoices, error: invoicesError } = await supabaseClient.from("invoices").select().eq("user_id", userId)
 
-    const request = store.get(id)
+  if (invoicesError) {
+    console.error("Error getting invoices by user ID:", invoicesError)
+    throw new Error(`Error getting invoices by user ID: ${invoicesError.message}`)
+  }
 
-    request.onsuccess = () => {
-      resolve(request.result || null)
-    }
+  // Get all invoice items for these invoices
+  const invoiceIds = invoices.map((invoice) => invoice.id)
 
-    request.onerror = () => {
-      reject("Error al obtener el cliente")
-    }
-  })
-}
+  if (invoiceIds.length === 0) {
+    return []
+  }
 
-export const updateClient = async (client: Client): Promise<Client> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["clients"], "readwrite")
-    const store = transaction.objectStore("clients")
+  const { data: items, error: itemsError } = await supabaseClient
+    .from("invoice_items")
+    .select()
+    .in("invoice_id", invoiceIds)
 
-    const request = store.put(client)
+  if (itemsError) {
+    console.error("Error getting invoice items:", itemsError)
+    throw new Error(`Error getting invoice items: ${itemsError.message}`)
+  }
 
-    request.onsuccess = () => {
-      // Crear notificación
-      createNotification({
-        userId: client.userId,
-        title: "Cliente actualizado",
-        message: `Se ha actualizado la información del cliente ${client.name}.`,
-        type: "info",
-        relatedId: client.id,
-        relatedType: "client",
-        read: false,
-        createdAt: new Date(),
-      }).catch(console.error)
-
-      resolve(client)
-    }
-
-    request.onerror = () => {
-      reject("Error al actualizar el cliente")
-    }
-  })
-}
-
-export const deleteClient = async (id: string): Promise<void> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["clients"], "readwrite")
-    const store = transaction.objectStore("clients")
-
-    // Primero obtenemos el cliente para crear la notificación
-    const getRequest = store.get(id)
-
-    getRequest.onsuccess = () => {
-      const client = getRequest.result
-      if (!client) {
-        reject("Cliente no encontrado")
-        return
+  // Group items by invoice_id
+  const itemsByInvoiceId = items.reduce(
+    (acc, item) => {
+      if (!acc[item.invoice_id]) {
+        acc[item.invoice_id] = []
       }
+      acc[item.invoice_id].push(item)
+      return acc
+    },
+    {} as Record<string, Tables["invoice_items"][]>,
+  )
 
-      const deleteRequest = store.delete(id)
-
-      deleteRequest.onsuccess = () => {
-        // Crear notificación
-        createNotification({
-          userId: client.userId,
-          title: "Cliente eliminado",
-          message: `Se ha eliminado el cliente ${client.name}.`,
-          type: "warning",
-          relatedType: "client",
-          read: false,
-          createdAt: new Date(),
-        }).catch(console.error)
-
-        resolve()
-      }
-
-      deleteRequest.onerror = () => {
-        reject("Error al eliminar el cliente")
-      }
-    }
-
-    getRequest.onerror = () => {
-      reject("Error al obtener el cliente para eliminar")
-    }
-  })
+  // Convert invoices with their items
+  return invoices.map((invoice) => convertInvoiceFromSupabase(invoice, itemsByInvoiceId[invoice.id] || []))
 }
 
-// Funciones para facturas
-export const createInvoice = async (invoiceData: Omit<Invoice, "id">): Promise<Invoice> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["invoices"], "readwrite")
-    const store = transaction.objectStore("invoices")
-
-    const invoice: Invoice = {
-      id: uuidv4(),
-      ...invoiceData,
-    }
-
-    const request = store.add(invoice)
-
-    request.onsuccess = () => {
-      // Crear notificación
-      createNotification({
-        userId: invoice.userId,
-        title: "Nueva factura",
-        message: `Se ha creado la factura #${invoice.invoiceNumber} por ${new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" }).format(invoice.total)}.`,
-        type: "success",
-        relatedId: invoice.id,
-        relatedType: "invoice",
-        read: false,
-        createdAt: new Date(),
-      }).catch(console.error)
-
-      resolve(invoice)
-    }
-
-    request.onerror = () => {
-      reject("Error al crear la factura")
-    }
-  })
-}
-
-export const getInvoicesByUserId = async (userId: string): Promise<Invoice[]> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["invoices"], "readonly")
-    const store = transaction.objectStore("invoices")
-    const index = store.index("userId")
-
-    const request = index.getAll(userId)
-
-    request.onsuccess = () => {
-      resolve(request.result || [])
-    }
-
-    request.onerror = () => {
-      reject("Error al obtener las facturas")
-    }
-  })
-}
-
-// Modificar solo la función getInvoiceById para asegurarnos de que siempre tenga una clave válida
-export const getInvoiceById = async (id: string): Promise<Invoice | null> => {
+export async function getInvoiceById(id: string): Promise<Invoice | null> {
   if (!id) {
-    console.error("Error: ID de factura no proporcionado")
+    console.error("Error: Invoice ID not provided")
     return null
   }
 
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["invoices"], "readonly")
-    const store = transaction.objectStore("invoices")
+  const { data: invoice, error: invoiceError } = await supabaseClient.from("invoices").select().eq("id", id).single()
 
-    const request = store.get(id)
+  if (invoiceError) {
+    if (invoiceError.code === "PGRST116") {
+      // PGRST116 means no rows returned
+      return null
+    }
+    console.error("Error getting invoice by ID:", invoiceError)
+    throw new Error(`Error getting invoice by ID: ${invoiceError.message}`)
+  }
 
-    request.onsuccess = () => {
-      resolve(request.result || null)
+  const { data: items, error: itemsError } = await supabaseClient.from("invoice_items").select().eq("invoice_id", id)
+
+  if (itemsError) {
+    console.error("Error getting invoice items:", itemsError)
+    throw new Error(`Error getting invoice items: ${itemsError.message}`)
+  }
+
+  return convertInvoiceFromSupabase(invoice, items)
+}
+
+export async function updateInvoice(invoice: Invoice): Promise<Invoice> {
+  // First get the original invoice to compare changes
+  const originalInvoice = await getInvoiceById(invoice.id)
+
+  // Update invoice
+  const { data: updatedInvoice, error: invoiceError } = await supabaseClient
+    .from("invoices")
+    .update({
+      client_id: invoice.clientId,
+      date: invoice.date.toISOString().split("T")[0],
+      due_date: invoice.dueDate.toISOString().split("T")[0],
+      subtotal: invoice.subtotal,
+      tax_rate: invoice.taxRate,
+      tax_amount: invoice.taxAmount,
+      total: invoice.total,
+      status: invoice.status,
+      notes: invoice.notes || null,
+    })
+    .eq("id", invoice.id)
+    .select()
+    .single()
+
+  if (invoiceError) {
+    console.error("Error updating invoice:", invoiceError)
+    throw new Error(`Error updating invoice: ${invoiceError.message}`)
+  }
+
+  // Delete existing items and insert new ones
+  const { error: deleteError } = await supabaseClient.from("invoice_items").delete().eq("invoice_id", invoice.id)
+
+  if (deleteError) {
+    console.error("Error deleting invoice items:", deleteError)
+    throw new Error(`Error deleting invoice items: ${deleteError.message}`)
+  }
+
+  const invoiceItems = invoice.items.map((item) => ({
+    invoice_id: invoice.id,
+    description: item.description,
+    quantity: item.quantity,
+    price: item.price,
+    taxable: item.taxable,
+    amount: item.amount,
+  }))
+
+  const { data: items, error: itemsError } = await supabaseClient.from("invoice_items").insert(invoiceItems).select()
+
+  if (itemsError) {
+    console.error("Error creating invoice items:", itemsError)
+    throw new Error(`Error creating invoice items: ${itemsError.message}`)
+  }
+
+  // Create notification if status changed
+  if (originalInvoice && originalInvoice.status !== invoice.status) {
+    let message = ""
+    let type: "info" | "warning" | "success" | "error" = "info"
+
+    switch (invoice.status) {
+      case "paid":
+        message = `La factura #${invoice.invoiceNumber} ha sido marcada como pagada.`
+        type = "success"
+        break
+      case "overdue":
+        message = `La factura #${invoice.invoiceNumber} ha vencido.`
+        type = "warning"
+        break
+      case "cancelled":
+        message = `La factura #${invoice.invoiceNumber} ha sido cancelada.`
+        type = "warning"
+        break
+      default:
+        message = `El estado de la factura #${invoice.invoiceNumber} ha cambiado a ${invoice.status}.`
     }
 
-    request.onerror = (event) => {
-      console.error("Error al obtener la factura:", event)
-      reject("Error al obtener la factura")
-    }
+    await createNotification({
+      userId: invoice.userId,
+      title: "Estado de factura actualizado",
+      message,
+      type,
+      relatedId: invoice.id,
+      relatedType: "invoice",
+      read: false,
+    })
+  }
+
+  return convertInvoiceFromSupabase(updatedInvoice, items)
+}
+
+export async function deleteInvoice(id: string): Promise<void> {
+  // First get the invoice to create the notification
+  const invoice = await getInvoiceById(id)
+  if (!invoice) {
+    throw new Error("Invoice not found")
+  }
+
+  // Delete invoice (cascade will delete items)
+  const { error } = await supabaseClient.from("invoices").delete().eq("id", id)
+
+  if (error) {
+    console.error("Error deleting invoice:", error)
+    throw new Error(`Error deleting invoice: ${error.message}`)
+  }
+
+  // Create notification
+  await createNotification({
+    userId: invoice.userId,
+    title: "Factura eliminada",
+    message: `Se ha eliminado la factura #${invoice.invoiceNumber}.`,
+    type: "warning",
+    relatedType: "invoice",
+    read: false,
   })
 }
 
-export const updateInvoice = async (invoice: Invoice): Promise<Invoice> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["invoices"], "readwrite")
-    const store = transaction.objectStore("invoices")
+// Expense functions
+export async function createExpense(expenseData: Omit<Expense, "id" | "createdAt">): Promise<Expense> {
+  const { data, error } = await supabaseClient
+    .from("expenses")
+    .insert(convertExpenseToSupabase(expenseData))
+    .select()
+    .single()
 
-    // Primero obtenemos la factura original para comparar cambios
-    const getRequest = store.get(invoice.id)
+  if (error) {
+    console.error("Error creating expense:", error)
+    throw new Error(`Error creating expense: ${error.message}`)
+  }
 
-    getRequest.onsuccess = () => {
-      const originalInvoice = getRequest.result
-      const updateRequest = store.put(invoice)
+  // Create notification
+  await createNotification({
+    userId: expenseData.userId,
+    title: "Nuevo gasto",
+    message: `Se ha registrado un gasto de ${new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" }).format(expenseData.amount)} en la categoría ${expenseData.category}.`,
+    type: "info",
+    relatedId: data.id,
+    relatedType: "expense",
+    read: false,
+  })
 
-      updateRequest.onsuccess = () => {
-        // Crear notificación si cambió el estado
-        if (originalInvoice && originalInvoice.status !== invoice.status) {
-          let message = ""
-          let type: "info" | "warning" | "success" | "error" = "info"
+  return convertExpenseFromSupabase(data)
+}
 
-          switch (invoice.status) {
-            case "paid":
-              message = `La factura #${invoice.invoiceNumber} ha sido marcada como pagada.`
-              type = "success"
-              break
-            case "overdue":
-              message = `La factura #${invoice.invoiceNumber} ha vencido.`
-              type = "warning"
-              break
-            case "cancelled":
-              message = `La factura #${invoice.invoiceNumber} ha sido cancelada.`
-              type = "warning"
-              break
-            default:
-              message = `El estado de la factura #${invoice.invoiceNumber} ha cambiado a ${invoice.status}.`
-          }
+export async function getExpensesByUserId(userId: string): Promise<Expense[]> {
+  const { data, error } = await supabaseClient.from("expenses").select().eq("user_id", userId)
 
-          createNotification({
-            userId: invoice.userId,
-            title: "Estado de factura actualizado",
-            message,
-            type,
-            relatedId: invoice.id,
-            relatedType: "invoice",
-            read: false,
-            createdAt: new Date(),
-          }).catch(console.error)
-        } else if (!originalInvoice) {
-          // Si no existía la factura original (caso raro), creamos una notificación genérica
-          createNotification({
-            userId: invoice.userId,
-            title: "Factura actualizada",
-            message: `Se ha actualizado la factura #${invoice.invoiceNumber}.`,
-            type: "info",
-            relatedId: invoice.id,
-            relatedType: "invoice",
-            read: false,
-            createdAt: new Date(),
-          }).catch(console.error)
+  if (error) {
+    console.error("Error getting expenses by user ID:", error)
+    throw new Error(`Error getting expenses by user ID: ${error.message}`)
+  }
+
+  return data.map(convertExpenseFromSupabase)
+}
+
+export async function getExpenseById(id: string): Promise<Expense | null> {
+  const { data, error } = await supabaseClient.from("expenses").select().eq("id", id).single()
+
+  if (error) {
+    if (error.code === "PGRST116") {
+      // PGRST116 means no rows returned
+      return null
+    }
+    console.error("Error getting expense by ID:", error)
+    throw new Error(`Error getting expense by ID: ${error.message}`)
+  }
+
+  return data ? convertExpenseFromSupabase(data) : null
+}
+
+export async function updateExpense(expense: Expense): Promise<Expense> {
+  const { data, error } = await supabaseClient
+    .from("expenses")
+    .update(convertExpenseToSupabase(expense))
+    .eq("id", expense.id)
+    .select()
+    .single()
+
+  if (error) {
+    console.error("Error updating expense:", error)
+    throw new Error(`Error updating expense: ${error.message}`)
+  }
+
+  // Create notification
+  await createNotification({
+    userId: expense.userId,
+    title: "Gasto actualizado",
+    message: `Se ha actualizado el gasto de ${new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" }).format(expense.amount)} en la categoría ${expense.category}.`,
+    type: "info",
+    relatedId: expense.id,
+    relatedType: "expense",
+    read: false,
+  })
+
+  return convertExpenseFromSupabase(data)
+}
+
+export async function deleteExpense(id: string): Promise<void> {
+  // First get the expense to create the notification
+  const expense = await getExpenseById(id)
+  if (!expense) {
+    throw new Error("Expense not found")
+  }
+
+  const { error } = await supabaseClient.from("expenses").delete().eq("id", id)
+
+  if (error) {
+    console.error("Error deleting expense:", error)
+    throw new Error(`Error deleting expense: ${error.message}`)
+  }
+
+  // Create notification
+  await createNotification({
+    userId: expense.userId,
+    title: "Gasto eliminado",
+    message: `Se ha eliminado un gasto de ${new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" }).format(expense.amount)} en la categoría ${expense.category}.`,
+    type: "warning",
+    relatedType: "expense",
+    read: false,
+  })
+}
+
+// Notification functions
+export async function createNotification(
+  notificationData: Omit<Notification, "id" | "createdAt">,
+): Promise<Notification> {
+  const { data, error } = await supabaseClient
+    .from("notifications")
+    .insert(convertNotificationToSupabase(notificationData))
+    .select()
+    .single()
+
+  if (error) {
+    console.error("Error creating notification:", error)
+    throw new Error(`Error creating notification: ${error.message}`)
+  }
+
+  return convertNotificationFromSupabase(data)
+}
+
+export async function getNotificationsByUserId(userId: string): Promise<Notification[]> {
+  const { data, error } = await supabaseClient
+    .from("notifications")
+    .select()
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+
+  if (error) {
+    console.error("Error getting notifications by user ID:", error)
+    throw new Error(`Error getting notifications by user ID: ${error.message}`)
+  }
+
+  return data.map(convertNotificationFromSupabase)
+}
+
+export async function getUnreadNotificationsCount(userId: string): Promise<number> {
+  const { count, error } = await supabaseClient
+    .from("notifications")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("read", false)
+
+  if (error) {
+    console.error("Error getting unread notifications count:", error)
+    throw new Error(`Error getting unread notifications count: ${error.message}`)
+  }
+
+  return count || 0
+}
+
+export async function markNotificationAsRead(id: string): Promise<void> {
+  const { error } = await supabaseClient.from("notifications").update({ read: true }).eq("id", id)
+
+  if (error) {
+    console.error("Error marking notification as read:", error)
+    throw new Error(`Error marking notification as read: ${error.message}`)
+  }
+}
+
+export async function markAllNotificationsAsRead(userId: string): Promise<void> {
+  const { error } = await supabaseClient
+    .from("notifications")
+    .update({ read: true })
+    .eq("user_id", userId)
+    .eq("read", false)
+
+  if (error) {
+    console.error("Error marking all notifications as read:", error)
+    throw new Error(`Error marking all notifications as read: ${error.message}`)
+  }
+}
+
+export async function deleteNotification(id: string): Promise<void> {
+  const { error } = await supabaseClient.from("notifications").delete().eq("id", id)
+
+  if (error) {
+    console.error("Error deleting notification:", error)
+    throw new Error(`Error deleting notification: ${error.message}`)
+  }
+}
+
+export async function deleteAllNotifications(userId: string): Promise<void> {
+  const { error } = await supabaseClient.from("notifications").delete().eq("user_id", userId)
+
+  if (error) {
+    console.error("Error deleting all notifications:", error)
+    throw new Error(`Error deleting all notifications: ${error.message}`)
+  }
+}
+
+// Report functions
+export async function getInvoicesByDateRange(userId: string, startDate: Date, endDate: Date): Promise<Invoice[]> {
+  const { data: invoices, error: invoicesError } = await supabaseClient
+    .from("invoices")
+    .select()
+    .eq("user_id", userId)
+    .gte("date", startDate.toISOString().split("T")[0])
+    .lte("date", endDate.toISOString().split("T")[0])
+
+  if (invoicesError) {
+    console.error("Error getting invoices by date range:", invoicesError)
+    throw new Error(`Error getting invoices by date range: ${invoicesError.message}`)
+  }
+
+  if (invoices.length === 0) {
+    return []
+  }
+
+  // Get all invoice items for these invoices
+  const invoiceIds = invoices.map((invoice) => invoice.id)
+  const { data: items, error: itemsError } = await supabaseClient
+    .from("invoice_items")
+    .select()
+    .in("invoice_id", invoiceIds)
+
+  if (itemsError) {
+    console.error("Error getting invoice items:", itemsError)
+    throw new Error(`Error getting invoice items: ${itemsError.message}`)
+  }
+
+  // Group items by invoice_id
+  const itemsByInvoiceId = items.reduce(
+    (acc, item) => {
+      if (!acc[item.invoice_id]) {
+        acc[item.invoice_id] = []
+      }
+      acc[item.invoice_id].push(item)
+      return acc
+    },
+    {} as Record<string, Tables["invoice_items"][]>,
+  )
+
+  // Convert invoices with their items
+  return invoices.map((invoice) => convertInvoiceFromSupabase(invoice, itemsByInvoiceId[invoice.id] || []))
+}
+
+export async function getExpensesByDateRange(userId: string, startDate: Date, endDate: Date): Promise<Expense[]> {
+  const { data, error } = await supabaseClient
+    .from("expenses")
+    .select()
+    .eq("user_id", userId)
+    .gte("date", startDate.toISOString().split("T")[0])
+    .lte("date", endDate.toISOString().split("T")[0])
+
+  if (error) {
+    console.error("Error getting expenses by date range:", error)
+    throw new Error(`Error getting expenses by date range: ${error.message}`)
+  }
+
+  return data.map(convertExpenseFromSupabase)
+}
+
+// Function to check for overdue invoices
+export async function checkOverdueInvoices(userId: string): Promise<void> {
+  try {
+    const today = new Date().toISOString().split("T")[0]
+
+    // Find pending invoices that are overdue
+    const { data: overdueInvoices, error } = await supabaseClient
+      .from("invoices")
+      .select()
+      .eq("user_id", userId)
+      .eq("status", "pending")
+      .lt("due_date", today)
+
+    if (error) {
+      console.error("Error checking overdue invoices:", error)
+      return
+    }
+
+    // Update each overdue invoice
+    for (const invoice of overdueInvoices) {
+      // Only update if not already marked as overdue
+      if (invoice.status !== "overdue") {
+        const { error: updateError } = await supabaseClient
+          .from("invoices")
+          .update({ status: "overdue" })
+          .eq("id", invoice.id)
+
+        if (updateError) {
+          console.error(`Error updating invoice ${invoice.id} to overdue:`, updateError)
+          continue
         }
 
-        resolve(invoice)
-      }
-
-      updateRequest.onerror = () => {
-        reject("Error al actualizar la factura")
-      }
-    }
-
-    getRequest.onerror = () => {
-      reject("Error al obtener la factura original")
-    }
-  })
-}
-
-export const deleteInvoice = async (id: string): Promise<void> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["invoices"], "readwrite")
-    const store = transaction.objectStore("invoices")
-
-    // Primero obtenemos la factura para crear la notificación
-    const getRequest = store.get(id)
-
-    getRequest.onsuccess = () => {
-      const invoice = getRequest.result
-      if (!invoice) {
-        reject("Factura no encontrada")
-        return
-      }
-
-      const deleteRequest = store.delete(id)
-
-      deleteRequest.onsuccess = () => {
-        // Crear notificación
-        createNotification({
-          userId: invoice.userId,
-          title: "Factura eliminada",
-          message: `Se ha eliminado la factura #${invoice.invoiceNumber}.`,
+        // Create notification
+        await createNotification({
+          userId,
+          title: "Factura vencida",
+          message: `La factura #${invoice.invoice_number} ha vencido.`,
           type: "warning",
+          relatedId: invoice.id,
           relatedType: "invoice",
           read: false,
-          createdAt: new Date(),
-        }).catch(console.error)
-
-        resolve()
-      }
-
-      deleteRequest.onerror = () => {
-        reject("Error al eliminar la factura")
-      }
-    }
-
-    getRequest.onerror = () => {
-      reject("Error al obtener la factura para eliminar")
-    }
-  })
-}
-
-// Funciones para gastos
-export const createExpense = async (expenseData: Omit<Expense, "id">): Promise<Expense> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["expenses"], "readwrite")
-    const store = transaction.objectStore("expenses")
-
-    const expense: Expense = {
-      id: uuidv4(),
-      ...expenseData,
-    }
-
-    const request = store.add(expense)
-
-    request.onsuccess = () => {
-      // Crear notificación
-      createNotification({
-        userId: expense.userId,
-        title: "Nuevo gasto",
-        message: `Se ha registrado un gasto de ${new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" }).format(expense.amount)} en la categoría ${expense.category}.`,
-        type: "info",
-        relatedId: expense.id,
-        relatedType: "expense",
-        read: false,
-        createdAt: new Date(),
-      }).catch(console.error)
-
-      resolve(expense)
-    }
-
-    request.onerror = () => {
-      reject("Error al crear el gasto")
-    }
-  })
-}
-
-export const getExpensesByUserId = async (userId: string): Promise<Expense[]> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["expenses"], "readonly")
-    const store = transaction.objectStore("expenses")
-    const index = store.index("userId")
-
-    const request = index.getAll(userId)
-
-    request.onsuccess = () => {
-      resolve(request.result || [])
-    }
-
-    request.onerror = () => {
-      reject("Error al obtener los gastos")
-    }
-  })
-}
-
-export const getExpenseById = async (id: string): Promise<Expense | null> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["expenses"], "readonly")
-    const store = transaction.objectStore("expenses")
-
-    const request = store.get(id)
-
-    request.onsuccess = () => {
-      resolve(request.result || null)
-    }
-
-    request.onerror = () => {
-      reject("Error al obtener el gasto")
-    }
-  })
-}
-
-export const updateExpense = async (expense: Expense): Promise<Expense> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["expenses"], "readwrite")
-    const store = transaction.objectStore("expenses")
-
-    const request = store.put(expense)
-
-    request.onsuccess = () => {
-      // Crear notificación
-      createNotification({
-        userId: expense.userId,
-        title: "Gasto actualizado",
-        message: `Se ha actualizado el gasto de ${new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" }).format(expense.amount)} en la categoría ${expense.category}.`,
-        type: "info",
-        relatedId: expense.id,
-        relatedType: "expense",
-        read: false,
-        createdAt: new Date(),
-      }).catch(console.error)
-
-      resolve(expense)
-    }
-
-    request.onerror = () => {
-      reject("Error al actualizar el gasto")
-    }
-  })
-}
-
-export const deleteExpense = async (id: string): Promise<void> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["expenses"], "readwrite")
-    const store = transaction.objectStore("expenses")
-
-    // Primero obtenemos el gasto para crear la notificación
-    const getRequest = store.get(id)
-
-    getRequest.onsuccess = () => {
-      const expense = getRequest.result
-      if (!expense) {
-        reject("Gasto no encontrado")
-        return
-      }
-
-      const deleteRequest = store.delete(id)
-
-      deleteRequest.onsuccess = () => {
-        // Crear notificación
-        createNotification({
-          userId: expense.userId,
-          title: "Gasto eliminado",
-          message: `Se ha eliminado un gasto de ${new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" }).format(expense.amount)} en la categoría ${expense.category}.`,
-          type: "warning",
-          relatedType: "expense",
-          read: false,
-          createdAt: new Date(),
-        }).catch(console.error)
-
-        resolve()
-      }
-
-      deleteRequest.onerror = () => {
-        reject("Error al eliminar el gasto")
-      }
-    }
-
-    getRequest.onerror = () => {
-      reject("Error al obtener el gasto para eliminar")
-    }
-  })
-}
-
-// Funciones para reportes
-export const getInvoicesByDateRange = async (userId: string, startDate: Date, endDate: Date): Promise<Invoice[]> => {
-  const allInvoices = await getInvoicesByUserId(userId)
-  return allInvoices.filter((invoice) => invoice.date >= startDate && invoice.date <= endDate)
-}
-
-export const getExpensesByDateRange = async (userId: string, startDate: Date, endDate: Date): Promise<Expense[]> => {
-  const allExpenses = await getExpensesByUserId(userId)
-  return allExpenses.filter((expense) => expense.date >= startDate && expense.date <= endDate)
-}
-
-// Funciones para notificaciones
-export const createNotification = async (notificationData: Omit<Notification, "id">): Promise<Notification> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["notifications"], "readwrite")
-    const store = transaction.objectStore("notifications")
-
-    const notification: Notification = {
-      id: uuidv4(),
-      ...notificationData,
-    }
-
-    const request = store.add(notification)
-
-    request.onsuccess = () => {
-      resolve(notification)
-    }
-
-    request.onerror = () => {
-      reject("Error al crear la notificación")
-    }
-  })
-}
-
-export const getNotificationsByUserId = async (userId: string): Promise<Notification[]> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["notifications"], "readonly")
-    const store = transaction.objectStore("notifications")
-    const index = store.index("userId")
-
-    const request = index.getAll(userId)
-
-    request.onsuccess = () => {
-      // Ordenar por fecha de creación (más recientes primero)
-      const notifications = request.result || []
-      notifications.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      resolve(notifications)
-    }
-
-    request.onerror = () => {
-      reject("Error al obtener las notificaciones")
-    }
-  })
-}
-
-export const getUnreadNotificationsCount = async (userId: string): Promise<number> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["notifications"], "readonly")
-    const store = transaction.objectStore("notifications")
-    const index = store.index("userId")
-
-    const request = index.getAll(userId)
-
-    request.onsuccess = () => {
-      const notifications = request.result || []
-      const unreadCount = notifications.filter((n) => !n.read).length
-      resolve(unreadCount)
-    }
-
-    request.onerror = () => {
-      reject("Error al obtener el conteo de notificaciones")
-    }
-  })
-}
-
-export const markNotificationAsRead = async (id: string): Promise<void> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["notifications"], "readwrite")
-    const store = transaction.objectStore("notifications")
-
-    // Primero obtenemos la notificación
-    const getRequest = store.get(id)
-
-    getRequest.onsuccess = () => {
-      const notification = getRequest.result
-      if (!notification) {
-        reject("Notificación no encontrada")
-        return
-      }
-
-      // Actualizamos el estado de lectura
-      notification.read = true
-
-      const updateRequest = store.put(notification)
-
-      updateRequest.onsuccess = () => {
-        resolve()
-      }
-
-      updateRequest.onerror = () => {
-        reject("Error al marcar la notificación como leída")
-      }
-    }
-
-    getRequest.onerror = () => {
-      reject("Error al obtener la notificación")
-    }
-  })
-}
-
-export const markAllNotificationsAsRead = async (userId: string): Promise<void> => {
-  const db = await initializeDB()
-  return new Promise(async (resolve, reject) => {
-    try {
-      // Obtenemos todas las notificaciones no leídas
-      const notifications = await getNotificationsByUserId(userId)
-      const unreadNotifications = notifications.filter((n) => !n.read)
-
-      if (unreadNotifications.length === 0) {
-        resolve()
-        return
-      }
-
-      const transaction = db.transaction(["notifications"], "readwrite")
-      const store = transaction.objectStore("notifications")
-
-      let completed = 0
-      let errors = 0
-
-      unreadNotifications.forEach((notification) => {
-        notification.read = true
-        const request = store.put(notification)
-
-        request.onsuccess = () => {
-          completed++
-          if (completed + errors === unreadNotifications.length) {
-            if (errors > 0) {
-              reject(`Error al marcar ${errors} notificaciones como leídas`)
-            } else {
-              resolve()
-            }
-          }
-        }
-
-        request.onerror = () => {
-          errors++
-          completed++
-          if (completed + errors === unreadNotifications.length) {
-            reject(`Error al marcar ${errors} notificaciones como leídas`)
-          }
-        }
-      })
-    } catch (error) {
-      reject("Error al marcar todas las notificaciones como leídas")
-    }
-  })
-}
-
-export const deleteNotification = async (id: string): Promise<void> => {
-  const db = await initializeDB()
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(["notifications"], "readwrite")
-    const store = transaction.objectStore("notifications")
-
-    const request = store.delete(id)
-
-    request.onsuccess = () => {
-      resolve()
-    }
-
-    request.onerror = () => {
-      reject("Error al eliminar la notificación")
-    }
-  })
-}
-
-export const deleteAllNotifications = async (userId: string): Promise<void> => {
-  const db = await initializeDB()
-  return new Promise(async (resolve, reject) => {
-    try {
-      // Obtenemos todas las notificaciones del usuario
-      const notifications = await getNotificationsByUserId(userId)
-
-      if (notifications.length === 0) {
-        resolve()
-        return
-      }
-
-      const transaction = db.transaction(["notifications"], "readwrite")
-      const store = transaction.objectStore("notifications")
-
-      let completed = 0
-      let errors = 0
-
-      notifications.forEach((notification) => {
-        const request = store.delete(notification.id)
-
-        request.onsuccess = () => {
-          completed++
-          if (completed + errors === notifications.length) {
-            if (errors > 0) {
-              reject(`Error al eliminar ${errors} notificaciones`)
-            } else {
-              resolve()
-            }
-          }
-        }
-
-        request.onerror = () => {
-          errors++
-          completed++
-          if (completed + errors === notifications.length) {
-            reject(`Error al eliminar ${errors} notificaciones`)
-          }
-        }
-      })
-    } catch (error) {
-      reject("Error al eliminar todas las notificaciones")
-    }
-  })
-}
-
-// Función para verificar facturas vencidas y crear notificaciones
-export const checkOverdueInvoices = async (userId: string): Promise<void> => {
-  try {
-    const invoices = await getInvoicesByUserId(userId)
-    const today = new Date()
-
-    // Filtrar facturas pendientes que han vencido
-    const overdueInvoices = invoices.filter(
-      (invoice) => invoice.status === "pending" && new Date(invoice.dueDate) < today,
-    )
-
-    // Actualizar estado y crear notificaciones
-    for (const invoice of overdueInvoices) {
-      // Solo actualizar si el estado no era ya "overdue"
-      if (invoice.status !== "overdue") {
-        invoice.status = "overdue"
-        await updateInvoice(invoice)
-
-        // La notificación se crea en updateInvoice
+        })
       }
     }
   } catch (error) {
-    console.error("Error al verificar facturas vencidas:", error)
+    console.error("Error in checkOverdueInvoices:", error)
+  }
+}
+
+// Agregar una función para verificar la conexión con Supabase
+export async function testSupabaseConnection(): Promise<boolean> {
+  try {
+    const { data, error } = await supabaseClient.from("users").select("count").limit(1)
+
+    if (error) {
+      console.error("Error al verificar la conexión con Supabase:", error)
+      return false
+    }
+
+    return true
+  } catch (error) {
+    console.error("Error inesperado al verificar la conexión:", error)
+    return false
   }
 }
 

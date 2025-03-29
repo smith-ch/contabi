@@ -9,6 +9,7 @@ import { formatCurrency } from "@/lib/utils"
 import { BarChart } from "@/components/charts/bar-chart"
 import { useTheme } from "next-themes"
 import { motion } from "framer-motion"
+import { SupabaseStatus } from "@/components/supabase-status"
 
 export default function DashboardPage() {
   const [user, setUser] = useState<any>(null)
@@ -89,6 +90,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      <SupabaseStatus />
       <motion.div
         className="bg-gradient-to-r from-primary/20 to-primary/10 dark:from-primary/30 dark:to-primary/20 rounded-lg p-6 text-foreground shadow-lg"
         initial={{ opacity: 0, y: -20 }}

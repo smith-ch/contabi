@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/components/ui/use-toast"
-import { initializeDB, createUser, getUserByEmail } from "@/lib/db"
+import { createUser, getUserByEmail } from "@/lib/db"
 
 export function RegisterForm() {
   const [isLoading, setIsLoading] = useState(false)
@@ -44,9 +44,6 @@ export function RegisterForm() {
     setIsLoading(true)
 
     try {
-      // Inicializar la base de datos
-      await initializeDB()
-
       // Verificar si el correo ya existe
       const existingUser = await getUserByEmail(formData.email)
 
@@ -56,6 +53,7 @@ export function RegisterForm() {
           description: "Este correo electrónico ya está registrado",
           variant: "destructive",
         })
+        setIsLoading(false)
         return
       }
 
@@ -66,7 +64,6 @@ export function RegisterForm() {
         password: formData.password,
         company: formData.company,
         rnc: formData.rnc,
-        createdAt: new Date(),
       })
 
       toast({

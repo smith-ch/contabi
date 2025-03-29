@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useToast } from "@/components/ui/use-toast"
+// Asegurarnos de que estamos importando desde el archivo correcto
 import { getInvoiceById, getClientById, type Invoice, type Client, type User } from "@/lib/db"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { ArrowLeft, Download, Edit, Printer, Share2 } from "lucide-react"
@@ -14,7 +15,6 @@ import jsPDF from "jspdf"
 import { useAlert } from "@/components/ui/alert-provider"
 
 export default function InvoiceDetailPage() {
-  // Usar useParams en lugar de React.use
   const params = useParams()
   const id = params?.id as string
 
@@ -41,7 +41,7 @@ export default function InvoiceDetailPage() {
         const userData = JSON.parse(storedUser)
         setUser(userData)
 
-        // Cargar factura
+        // Cargar factura usando Supabase
         const invoiceData = await getInvoiceById(id)
         if (!invoiceData) {
           toast({
@@ -55,7 +55,7 @@ export default function InvoiceDetailPage() {
 
         setInvoice(invoiceData)
 
-        // Cargar cliente
+        // Cargar cliente usando Supabase
         const clientData = await getClientById(invoiceData.clientId)
         if (clientData) {
           setClient(clientData)
