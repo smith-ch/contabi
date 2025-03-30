@@ -1,74 +1,37 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { getInvoiceById, getClientById, type Invoice, type Client } from "@/lib/db"
+import type { Invoice, Client } from "@/lib/db"
 import { getFileUrl, STORAGE_BUCKETS } from "@/lib/storage"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import Image from "next/image"
 
 interface InvoicePrintViewProps {
-  invoiceId: string
+  invoice: Invoice
+  client: Client
+  user: any
 }
 
-export function InvoicePrintView({ invoiceId }: InvoicePrintViewProps) {
-  const [invoice, setInvoice] = useState<Invoice | null>(null)
-  const [client, setClient] = useState<Client | null>(null)
-  const [user, setUser] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
+export function InvoicePrintView({ invoice, client, user }: InvoicePrintViewProps) {
   const [logoUrl, setLogoUrl] = useState<string | null>(null)
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        // Cargar datos del usuario
-        const storedUser = localStorage.getItem("currentUser")
-        if (storedUser) {
-          const userData = JSON.parse(storedUser)
-          setUser(userData)
-
-          // Cargar logo si existe
-          if (userData.logo) {
-            const url = await getFileUrl(STORAGE_BUCKETS.LOGOS, userData.logo)
-            setLogoUrl(url)
-          }
+    const loadLogo = async () => {
+      if (user?.logo) {
+        try {
+          const url = await getFileUrl(STORAGE_BUCKETS.LOGOS, user.logo)
+          setLogoUrl(url)
+        } catch (error) {
+          console.error("Error al cargar logo:", error)
         }
-
-        // Cargar factura
-        const invoiceData = await getInvoiceById(invoiceId)
-        if (invoiceData) {
-          setInvoice(invoiceData)
-
-          // Cargar cliente
-          const clientData = await getClientById(invoiceData.clientId)
-          if (clientData) {
-            setClient(clientData)
-          }
-        }
-      } catch (error) {
-        console.error("Error al cargar datos para impresión:", error)
-      } finally {
-        setLoading(false)
       }
     }
 
-    loadData()
-  }, [invoiceId])
+    loadLogo()
+  }, [user])
 
-  if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center p-8">
-        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-blue-800"></div>
-      </div>
-    )
-  }
-
-  if (!invoice || !client || !user) {
-    return (
-      <div className="flex h-full items-center justify-center p-8">
-        <p className="text-red-500">No se pudo cargar la información de la factura</p>
-      </div>
-    )
-  }
+  // Calcular base imponible (solo los items taxable)
+  const taxableAmount = invoice.items.filter((item) => item.taxable).reduce((sum, item) => sum + item.amount, 0)
 
   return (
     <div className="bg-white p-8 max-w-4xl mx-auto">
@@ -77,7 +40,13 @@ export function InvoicePrintView({ invoiceId }: InvoicePrintViewProps) {
         <div>
           {logoUrl ? (
             <div className="h-20 w-40 relative mb-2">
-              <Image src={logoUrl || "/placeholder.svg"} alt={user.company || "Logo"} fill className="object-contain" />
+              <Image
+                src={logoUrl || "/placeholder.svg"}
+                alt={user.company || "Logo"}
+                fill
+                className="object-contain"
+                priority
+              />
             </div>
           ) : (
             <h1 className="text-2xl font-bold text-gray-800">{user.company || "Mi Empresa"}</h1>
@@ -118,6 +87,7 @@ export function InvoicePrintView({ invoiceId }: InvoicePrintViewProps) {
             <th className="py-2 text-left text-gray-600">Descripción</th>
             <th className="py-2 text-right text-gray-600">Cantidad</th>
             <th className="py-2 text-right text-gray-600">Precio</th>
+            <th className="py-2 text-center text-gray-600">ITBIS</th>
             <th className="py-2 text-right text-gray-600">Importe</th>
           </tr>
         </thead>
@@ -127,6 +97,7 @@ export function InvoicePrintView({ invoiceId }: InvoicePrintViewProps) {
               <td className="py-3 text-gray-800">{item.description}</td>
               <td className="py-3 text-right text-gray-800">{item.quantity}</td>
               <td className="py-3 text-right text-gray-800">{formatCurrency(item.price)}</td>
+              <td className="py-3 text-center text-gray-800">{item.taxable ? "Sí" : "No"}</td>
               <td className="py-3 text-right text-gray-800">{formatCurrency(item.amount)}</td>
             </tr>
           ))}
@@ -151,17 +122,41 @@ export function InvoicePrintView({ invoiceId }: InvoicePrintViewProps) {
         </div>
       </div>
 
+      {/* Resumen de impuestos */}
+      <div className="mb-8">
+        <h3 className="text-sm font-semibold text-gray-500 mb-2">RESUMEN DE IMPUESTOS</h3>
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="bg-gray-50">
+              <th className="border-b p-2 text-center font-medium text-gray-600">TASA</th>
+              <th className="border-b p-2 text-center font-medium text-gray-600">IMPUESTOS</th>
+              <th className="border-b p-2 text-center font-medium text-gray-600">BASE IMPONIBLE</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-b border-gray-100">
+              <td className="p-2 text-center text-gray-800">ITBIS {invoice.taxRate * 100}%</td>
+              <td className="p-2 text-center text-gray-800">{formatCurrency(invoice.taxAmount)}</td>
+              <td className="p-2 text-center text-gray-800">{formatCurrency(taxableAmount)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
       {/* Notas */}
       {invoice.notes && (
         <div className="mb-8">
           <h3 className="text-sm font-semibold text-gray-500 mb-2">NOTAS</h3>
-          <p className="text-gray-600">{invoice.notes}</p>
+          <p className="text-gray-600 whitespace-pre-line">{invoice.notes}</p>
         </div>
       )}
 
       {/* Pie de página */}
       <div className="text-center text-gray-500 text-sm mt-16 pt-4 border-t border-gray-200">
         <p>Gracias por su preferencia</p>
+        <p className="mt-1">
+          Este documento es una factura fiscal válida según las regulaciones de la República Dominicana.
+        </p>
       </div>
     </div>
   )
