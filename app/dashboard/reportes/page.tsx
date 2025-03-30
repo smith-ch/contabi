@@ -12,7 +12,7 @@ import {
   checkOverdueInvoices,
 } from "@/lib/db"
 import { formatCurrency } from "@/lib/utils"
-import { BarChart, Download, LineChart, PieChart, Filter, Printer, Share2 } from "lucide-react"
+import { BarChart, Download, LineChart, PieChart, Filter, Printer, Share2, FileText } from "lucide-react"
 import { BarChart as BarChartComponent } from "@/components/charts/bar-chart"
 import { LineChart as LineChartComponent } from "@/components/charts/line-chart"
 import { PieChart as PieChartComponent } from "@/components/charts/pie-chart"
@@ -32,6 +32,7 @@ import { Label } from "@/components/ui/label"
 import { useAlert } from "@/components/ui/alert-provider"
 import html2canvas from "html2canvas"
 import jsPDF from "jspdf"
+import Link from "next/link"
 
 export default function ReportsPage() {
   const [user, setUser] = useState<any>(null)
@@ -74,18 +75,24 @@ export default function ReportsPage() {
         const invoices7 = await getInvoicesByDateRange(userData.id, sevenDaysAgo, now)
         const expenses7 = await getExpensesByDateRange(userData.id, sevenDaysAgo, now)
 
-        setInvoices7Days(invoices7)
+        // Filtrar facturas pagadas para ingresos reales
+        const paidInvoices7 = invoices7.filter((invoice) => invoice.status === "paid")
+
+        setInvoices7Days(paidInvoices7)
         setExpenses7Days(expenses7)
 
         // Cargar datos para los últimos 30 días
         const invoices30 = await getInvoicesByDateRange(userData.id, thirtyDaysAgo, now)
         const expenses30 = await getExpensesByDateRange(userData.id, thirtyDaysAgo, now)
 
-        setInvoices30Days(invoices30)
+        // Filtrar facturas pagadas para ingresos reales
+        const paidInvoices30 = invoices30.filter((invoice) => invoice.status === "paid")
+
+        setInvoices30Days(paidInvoices30)
         setExpenses30Days(expenses30)
 
         // Cargar datos para el rango personalizado inicial (últimos 30 días por defecto)
-        setCustomInvoices(invoices30)
+        setCustomInvoices(paidInvoices30)
         setCustomExpenses(expenses30)
       } catch (error) {
         console.error("Error al cargar datos:", error)
@@ -118,7 +125,10 @@ export default function ReportsPage() {
       const customInvoicesData = await getInvoicesByDateRange(user.id, customStartDate, customEndDate)
       const customExpensesData = await getExpensesByDateRange(user.id, customStartDate, customEndDate)
 
-      setCustomInvoices(customInvoicesData)
+      // Filtrar facturas pagadas para ingresos reales
+      const paidCustomInvoices = customInvoicesData.filter((invoice) => invoice.status === "paid")
+
+      setCustomInvoices(paidCustomInvoices)
       setCustomExpenses(customExpensesData)
 
       // Cambiar a la pestaña personalizada
@@ -440,6 +450,12 @@ export default function ReportsPage() {
           <p className="text-muted-foreground">Análisis detallado de sus ingresos y gastos</p>
         </div>
         <div className="flex gap-2">
+          <Link href="/dashboard/reportes/reporte-606">
+            <Button variant="outline">
+              <FileText className="mr-2 h-4 w-4" />
+              Reporte 606
+            </Button>
+          </Link>
           <Dialog>
             <DialogTrigger asChild>
               <Button variant="outline">
@@ -558,7 +574,7 @@ export default function ReportsPage() {
                   <div className="text-2xl font-bold text-green-600 dark:text-green-400">
                     {formatCurrency(summary7Days.totalIncome)}
                   </div>
-                  <p className="text-xs text-muted-foreground">{summary7Days.invoiceCount} facturas emitidas</p>
+                  <p className="text-xs text-muted-foreground">{summary7Days.invoiceCount} facturas pagadas</p>
                 </CardContent>
               </Card>
 
@@ -667,7 +683,7 @@ export default function ReportsPage() {
                   <div className="text-2xl font-bold text-green-600 dark:text-green-400">
                     {formatCurrency(summary30Days.totalIncome)}
                   </div>
-                  <p className="text-xs text-muted-foreground">{summary30Days.invoiceCount} facturas emitidas</p>
+                  <p className="text-xs text-muted-foreground">{summary30Days.invoiceCount} facturas pagadas</p>
                 </CardContent>
               </Card>
 
@@ -778,7 +794,7 @@ export default function ReportsPage() {
                   <div className="text-2xl font-bold text-green-600 dark:text-green-400">
                     {formatCurrency(summaryCustom.totalIncome)}
                   </div>
-                  <p className="text-xs text-muted-foreground">{summaryCustom.invoiceCount} facturas emitidas</p>
+                  <p className="text-xs text-muted-foreground">{summaryCustom.invoiceCount} facturas pagadas</p>
                 </CardContent>
               </Card>
 
