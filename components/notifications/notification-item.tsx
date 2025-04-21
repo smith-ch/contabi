@@ -53,6 +53,7 @@ export function NotificationItem({ notification, onUpdate, onDelete }: Notificat
       toast({
         title: "Notificación eliminada",
         description: "La notificación ha sido eliminada",
+        variant: "success",
       })
     } catch (error) {
       console.error("Error al eliminar notificación:", error)
@@ -161,4 +162,3 @@ export function NotificationItem({ notification, onUpdate, onDelete }: Notificat
     </Card>
   )
 }
-

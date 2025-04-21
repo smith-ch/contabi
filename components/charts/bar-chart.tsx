@@ -136,4 +136,3 @@ export function BarChart({ data, title, height = 300 }: BarChartProps) {
 
   return <canvas ref={chartRef} height={height} />
 }
-

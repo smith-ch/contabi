@@ -1,4 +1,4 @@
-import { supabaseClient } from "./supabase"
+import { supabaseClient, supabaseAdmin } from "./supabase"
 import { v4 as uuidv4 } from "uuid"
 
 // Definir los buckets de almacenamiento
@@ -27,8 +27,6 @@ export const ALLOWED_FILE_TYPES = {
   ],
 }
 
-
-
 // Límites de tamaño de archivo (en bytes)
 export const FILE_SIZE_LIMITS = {
   LOGO: 2 * 1024 * 1024, // 2MB
@@ -47,23 +45,37 @@ export interface UploadResponse {
  */
 export async function initializeStorage(): Promise<void> {
   try {
+    console.log("Inicializando almacenamiento...")
+
     // Verificar y crear buckets si no existen
     for (const bucket of Object.values(STORAGE_BUCKETS)) {
-      const { data: existingBucket, error: getBucketError } = await supabaseClient.storage.getBucket(bucket)
+      try {
+        // Usar supabaseAdmin en lugar de supabaseClient para tener permisos elevados
+        const { data: existingBucket, error: getBucketError } = await supabaseAdmin.storage.getBucket(bucket)
 
-      if (getBucketError && !existingBucket) {
-        const { error: createBucketError } = await supabaseClient.storage.createBucket(bucket, {
-          public: false,
-          fileSizeLimit: FILE_SIZE_LIMITS.ATTACHMENT,
-        })
+        if (getBucketError) {
+          console.log(`Bucket ${bucket} no existe, intentando crearlo...`)
 
-        if (createBucketError) {
-          console.error(`Error al crear bucket ${bucket}:`, createBucketError)
+          // Usar supabaseAdmin para crear el bucket
+          const { data, error: createBucketError } = await supabaseAdmin.storage.createBucket(bucket, {
+            public: true, // Hacer el bucket público para simplificar el acceso
+            fileSizeLimit: FILE_SIZE_LIMITS.ATTACHMENT,
+          })
+
+          if (createBucketError) {
+            console.error(`Error al crear bucket ${bucket}:`, createBucketError)
+          } else {
+            console.log(`Bucket ${bucket} creado exitosamente`)
+          }
         } else {
-          console.log(`Bucket ${bucket} creado exitosamente`)
+          console.log(`Bucket ${bucket} ya existe`)
         }
+      } catch (bucketError) {
+        console.error(`Error al procesar bucket ${bucket}:`, bucketError)
       }
     }
+
+    console.log("Inicialización de almacenamiento completada")
   } catch (error) {
     console.error("Error al inicializar almacenamiento:", error)
   }
@@ -165,7 +177,7 @@ export async function deleteFile(bucket: string, path: string): Promise<boolean>
 }
 
 /**
- * Lista los archivos de un usuario en un bucket específico
+ * Lista los archivos en un bucket para un usuario específico
  * @param bucket Bucket a consultar
  * @param userId ID del usuario
  * @returns Lista de archivos
@@ -185,4 +197,3 @@ export async function listUserFiles(bucket: string, userId: string): Promise<str
     return []
   }
 }
-

@@ -1,3 +1,7 @@
+/**
+ * Mock data for testing and development
+ */
+
 import type { Expense } from "@/types/report-types"
 import { format, subDays } from "date-fns"
 
@@ -21,12 +25,12 @@ export function generateMockExpenses(count = 10, startDate?: Date, endDate?: Dat
   const documentTypes = ["Factura", "Nota de Débito", "Nota de Crédito", "Comprobante de Compras"]
 
   const suppliers = [
-    { id: "sup-1", name: "Papelería Nacional", rnc: "101012345" },
-    { id: "sup-2", name: "Consultores Asociados", rnc: "131012345" },
-    { id: "sup-3", name: "TechStore", rnc: "501012345" },
-    { id: "sup-4", name: "Servicios Generales", rnc: "401789012" },
-    { id: "sup-5", name: "Distribuidora Central", rnc: "130987654" },
-    { id: "sup-6", name: "Importadora del Este", rnc: "101567890" },
+    { name: "Papelería Nacional", rnc: "101012345" },
+    { name: "Consultores Asociados", rnc: "131012345" },
+    { name: "TechStore", rnc: "501012345" },
+    { name: "Servicios Generales", rnc: "401789012" },
+    { name: "Distribuidora Central", rnc: "130987654" },
+    { name: "Importadora del Este", rnc: "101567890" },
   ]
 
   return Array.from({ length: count }, (_, i) => {
@@ -37,7 +41,6 @@ export function generateMockExpenses(count = 10, startDate?: Date, endDate?: Dat
 
     return {
       id: `exp-${i + 1}`,
-      userId: `user-${Math.floor(Math.random() * 1000)}`, // Genera un userId aleatorio
       date: formatDateToISO(date),
       description: `Compra de ${category.toLowerCase()}`,
       amount,
@@ -48,9 +51,6 @@ export function generateMockExpenses(count = 10, startDate?: Date, endDate?: Dat
       paymentMethod: paymentMethods[Math.floor(Math.random() * paymentMethods.length)],
       itbisIncluded: true,
       notes: `Nota de prueba para ${category.toLowerCase()}`,
-      status: "pending", // O puedes usar otros valores como "approved", "rejected"
-      createdAt: formatDateToISO(new Date()), // Fecha actual como fecha de creación
-      updatedAt: formatDateToISO(new Date()), // Fecha actual como última actualización
     }
   })
 }

@@ -107,6 +107,7 @@ export default function NewExpensePage() {
         amount,
         date: formData.date,
         receipt: formData.receipt || undefined,
+        createdAt: new Date(),
       })
 
       toast({
@@ -219,4 +220,3 @@ export default function NewExpensePage() {
     </div>
   )
 }
-

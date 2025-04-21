@@ -13,7 +13,6 @@ import { motion } from "framer-motion"
 import { useAlert } from "@/components/ui/alert-provider"
 
 export default function InvoicePrintPage() {
-  // Usar useParams en lugar de React.use
   const params = useParams()
   const id = params?.id as string
 
@@ -116,6 +115,7 @@ export default function InvoicePrintPage() {
         useCORS: true,
         logging: false,
         allowTaint: true,
+        backgroundColor: "#ffffff",
       })
 
       const imgData = canvas.toDataURL("image/png")
@@ -235,11 +235,10 @@ export default function InvoicePrintPage() {
         transition={{ duration: 0.5 }}
         className="bg-white dark:bg-zinc-900 rounded-lg shadow-lg overflow-hidden"
       >
-        <div ref={printRef} className="p-8">
+        <div ref={printRef} className="p-8 bg-white">
           <InvoicePrintView invoice={invoice} client={client} user={user} />
         </div>
       </motion.div>
     </div>
   )
 }
-

@@ -118,4 +118,3 @@ export function PieChart({ data, title, height = 300 }: PieChartProps) {
 
   return <canvas ref={chartRef} height={height} />
 }
-

@@ -1,4 +1,5 @@
 import VerifyTables from "@/components/debug/verify-tables"
+import VerifyStorage from "@/components/debug/verify-storage"
 
 export default function DiagnosticoPage() {
   return (
@@ -9,7 +10,7 @@ export default function DiagnosticoPage() {
       </p>
 
       <VerifyTables />
+      <VerifyStorage />
     </div>
   )
 }
-

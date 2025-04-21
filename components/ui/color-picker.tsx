@@ -42,4 +42,3 @@ export function ColorPicker({ color, onChange }: ColorPickerProps) {
     </div>
   )
 }
-

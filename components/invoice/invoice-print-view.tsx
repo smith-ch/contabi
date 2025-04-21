@@ -161,4 +161,3 @@ export function InvoicePrintView({ invoice, client, user }: InvoicePrintViewProp
     </div>
   )
 }
-

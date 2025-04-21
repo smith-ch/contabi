@@ -326,4 +326,3 @@ function getStatusText(status: string): string {
       return status
   }
 }
-

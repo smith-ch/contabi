@@ -110,4 +110,3 @@ BEGIN
       USING (true);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
-

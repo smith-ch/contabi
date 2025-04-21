@@ -1,15 +1,21 @@
 "use client"
 
-import { DialogFooter } from "@/components/ui/dialog"
-
+import { CardFooter } from "@/components/ui/card"
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   DropdownMenu,
@@ -22,14 +28,14 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
-import { ChevronDown, Download, Printer, RefreshCw, Send } from "lucide-react"
+import { AlertCircle, ChevronDown, Download, Printer, RefreshCw, Send } from "lucide-react"
 import { format, startOfMonth, endOfMonth } from "date-fns"
 import { es } from "date-fns/locale"
 import { exportToPDF, printElement } from "@/lib/pdf-utils"
 import { useToast } from "@/hooks/use-toast"
 import { createClient } from "@/lib/supabase-client"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
-// Tipos
 interface Expense {
   id: string
   date: Date | string
@@ -104,6 +110,70 @@ interface DGIICredentials {
   rnc: string
 }
 
+// Interfaces para los datos de Supabase
+interface SupabaseCategory {
+  name: string
+}
+
+interface SupabaseDocType {
+  name: string
+}
+
+interface SupabasePaymentMethod {
+  name: string
+}
+
+interface SupabaseSupplier {
+  id: string
+  name: string
+  rnc: string
+}
+
+interface SupabaseExpense {
+  id: string
+  date: string
+  description: string | null
+  amount: number
+  itbis_included: boolean
+  has_itbis: boolean
+  payment_method: string
+  status: "paid" | "pending" | "cancelled"
+  doc_type: string
+  ncf: string | null
+  ncf_modified: string | null
+  category: string
+  supplier_id: string
+  suppliers: {
+    id: string
+    name: string
+    rnc: string
+  } | null
+}
+
+// Mapeo de tipos de documentos para el formato 606
+const docTypeMapping: Record<string, string> = {
+  Factura: "01",
+  "Nota de Débito": "02",
+  "Nota de Crédito": "03",
+  "Comprobante de Compras": "04",
+  "Registro de Proveedores Informales": "11",
+  "Registro Único de Ingresos": "12",
+  "Comprobante de Gastos Menores": "13",
+  "Comprobante de Regímenes Especiales": "14",
+  "Comprobante Gubernamental": "15",
+}
+
+// Mapeo de métodos de pago para el formato 606
+const paymentMethodMapping: Record<string, string> = {
+  Efectivo: "01",
+  "Cheques/Transferencias/Depósito": "02",
+  "Tarjeta Crédito/Débito": "03",
+  "Compra a Crédito": "04",
+  Permuta: "05",
+  "Nota de Crédito": "06",
+  Mixto: "07",
+}
+
 export function Report606() {
   // Estado para el período seleccionado y fechas
   const [selectedPeriod, setSelectedPeriod] = useState<string>("")
@@ -113,6 +183,7 @@ export function Report606() {
 
   // Estado para los datos del reporte
   const [loading, setLoading] = useState<boolean>(false)
+  const [error, setError] = useState<string | null>(null)
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [reportEntries, setReportEntries] = useState<Report606Entry[]>([])
   const [reportSummary, setReportSummary] = useState<Report606Summary | null>(null)
@@ -190,350 +261,252 @@ export function Report606() {
       setSelectedPeriod(currentPeriod)
     }
 
-    const loadFilters = async () => {
+    loadPeriods()
+  }, [])
+
+  // Cargar filtros disponibles desde Supabase
+  useEffect(() => {
+    const loadAvailableFilters = async () => {
       try {
-        // En un caso real, estos datos vendrían de la base de datos
+        setLoading(true)
+        const supabase = createClient()
+
+        // Obtener el usuario actual
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser()
+
+        if (userError) {
+          console.error("Error al obtener usuario:", userError)
+          throw new Error("No se pudo obtener la información del usuario")
+        }
+
+        if (!user) {
+          console.warn("No hay usuario autenticado, usando configuración por defecto")
+          setLoading(false)
+          return
+        }
+
+        const userId = user.id
+
+        // Helper function to fetch and process data
+        const fetchData = async (tableName: string, column: string) => {
+          const { data, error } = await supabase.from(tableName).select(column).eq("user_id", userId).order(column)
+
+          if (error) {
+            console.error(`Error fetching ${tableName}:`, error)
+            return []
+          }
+
+          return [...new Set(data.map((item: any) => item[column]))]
+        }
+
+        // Fetch categories, document types, and payment methods
+        const categoriesPromise = fetchData("expenses", "category")
+        const documentTypesPromise = fetchData("expenses", "doc_type")
+        const paymentMethodsPromise = fetchData("expenses", "payment_method")
+
+        // Fetch suppliers
+        const suppliersPromise = supabase
+          .from("expenses")
+          .select("suppliers(id, name, rnc)")
+          .eq("user_id", userId)
+          .not("supplier_id", "is", null)
+          .order("supplier_id")
+          .then(({ data, error }) => {
+            if (error) {
+              console.error("Error fetching suppliers:", error)
+              return []
+            }
+
+            return [
+              ...new Set(
+                data
+                  ? data.map((s: any) => ({
+                      id: s.suppliers.id,
+                      name: s.suppliers.name,
+                      rnc: s.suppliers.rnc,
+                    }))
+                  : [],
+              ),
+            ]
+          })
+
+        // Resolve all promises in parallel
+        const [categories, documentTypes, paymentMethods, suppliers] = await Promise.all([
+          categoriesPromise,
+          documentTypesPromise,
+          paymentMethodsPromise,
+          suppliersPromise,
+        ])
+
         setAvailableFilters({
-          categories: ["Bienes", "Servicios", "Alquileres", "Importaciones", "Telecomunicaciones"],
-          documentTypes: ["Factura", "Nota de Débito", "Nota de Crédito", "Comprobante de Compras"],
-          paymentMethods: ["Efectivo", "Cheques/Transferencias/Depósito", "Tarjeta Crédito/Débito", "Compra a Crédito"],
-          suppliers: [
-            { id: "1", name: "Proveedor 1", rnc: "123456789" },
-            { id: "2", name: "Proveedor 2", rnc: "987654321" },
-          ],
+          categories,
+          documentTypes,
+          paymentMethods,
+          suppliers,
         })
       } catch (error) {
         console.error("Error al cargar filtros:", error)
+        setError("No se pudieron cargar los filtros disponibles.")
+      } finally {
+        setLoading(false)
       }
     }
 
-    loadPeriods()
-    loadFilters()
+    loadAvailableFilters()
   }, [])
 
-  // Efecto para actualizar fechas cuando cambia el período
-  useEffect(() => {
-    if (selectedPeriod) {
-      const year = Number.parseInt(selectedPeriod.substring(0, 4))
-      const month = Number.parseInt(selectedPeriod.substring(4, 6)) - 1 // Meses en JS son 0-indexed
-
-      const start = new Date(year, month, 1)
-      const end = new Date(year, month + 1, 0)
-
-      setStartDate(start)
-      setEndDate(end)
-    }
-  }, [selectedPeriod])
-
-  // Reemplazar el useEffect que causa el bucle infinito con esta implementación:
-
-  // Eliminar este useEffect que causa el problema
-  useEffect(() => {
-    if (startDate && endDate && selectedPeriod) {
-      const controller = new AbortController()
-
-      const fetchData = async () => {
-        try {
-          setLoading(true)
-          await loadReportData()
-        } catch (error) {
-          console.error("Error al cargar datos del reporte:", error)
-          toast({
-            title: "Error",
-            description: "No se pudieron cargar los datos del reporte. Intente nuevamente.",
-            variant: "destructive",
-          })
-        } finally {
-          setLoading(false)
-        }
-      }
-
-      fetchData()
-
-      return () => {
-        controller.abort()
-      }
-    }
-  }, [startDate, endDate, selectedPeriod, JSON.stringify(filters)])
-
-  // Y reemplazarlo con este nuevo useEffect que evita el bucle infinito
-  useEffect(() => {
-    // Crear una bandera para controlar si el componente está montado
-    let isMounted = true
-
-    const fetchData = async () => {
-      if (!startDate || !endDate || !selectedPeriod) return
-
-      try {
-        setLoading(true)
-
-        // En un caso real, estos datos vendrían de Supabase
-        const supabase = createClient()
-
-        // Simulamos una carga de datos
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-
-        // Solo continuar si el componente sigue montado
-        if (!isMounted) return
-
-        // Datos de ejemplo
-        const mockExpenses: Expense[] = [
-          {
-            id: "1",
-            date: new Date(startDate.getTime() + 2 * 24 * 60 * 60 * 1000),
-            supplier: {
-              id: "1",
-              name: "Proveedor 1",
-              rnc: "123456789",
-            },
-            ncf: "B0100000001",
-            description: "Compra de materiales",
-            category: "Bienes",
-            amount: 11800,
-            itbisIncluded: true,
-            hasItbis: true,
-            paymentMethod: "Efectivo",
-            status: "paid",
-            docType: "Factura",
-          },
-          {
-            id: "2",
-            date: new Date(startDate.getTime() + 5 * 24 * 60 * 60 * 1000),
-            supplier: {
-              id: "2",
-              name: "Proveedor 2",
-              rnc: "987654321",
-            },
-            ncf: "B0100000002",
-            description: "Servicios profesionales",
-            category: "Servicios",
-            amount: 5900,
-            itbisIncluded: true,
-            hasItbis: true,
-            paymentMethod: "Cheques/Transferencias/Depósito",
-            status: "paid",
-            docType: "Factura",
-          },
-        ]
-
-        // Aplicar filtros
-        const filteredExpenses = mockExpenses.filter((expense) => {
-          // Filtrar por categoría
-          if (filters.categories.length > 0 && !filters.categories.includes(expense.category)) {
-            return false
-          }
-
-          // Filtrar por tipo de documento
-          if (filters.documentTypes.length > 0 && !filters.documentTypes.includes(expense.docType)) {
-            return false
-          }
-
-          // Filtrar por método de pago
-          if (filters.paymentMethods.length > 0 && !filters.paymentMethods.includes(expense.paymentMethod)) {
-            return false
-          }
-
-          // Filtrar por proveedor
-          if (filters.suppliers.length > 0 && !filters.suppliers.includes(expense.supplier.id)) {
-            return false
-          }
-
-          // Filtrar por estado
-          if (filters.status.length > 0 && !filters.status.includes(expense.status)) {
-            return false
-          }
-
-          return true
-        })
-
-        // Calcular montos base e ITBIS
-        const processedExpenses = filteredExpenses.map((expense) => {
-          if (expense.hasItbis) {
-            if (expense.itbisIncluded) {
-              const baseAmount = +(expense.amount / 1.18).toFixed(2)
-              const itbisAmount = +(expense.amount - baseAmount).toFixed(2)
-              return { ...expense, baseAmount, itbisAmount }
-            } else {
-              const baseAmount = expense.amount
-              const itbisAmount = +(baseAmount * 0.18).toFixed(2)
-              return { ...expense, baseAmount, itbisAmount }
-            }
-          } else {
-            return { ...expense, baseAmount: expense.amount, itbisAmount: 0 }
-          }
-        })
-
-        // Solo actualizar estados si el componente sigue montado
-        if (isMounted) {
-          setExpenses(processedExpenses)
-
-          // Convertir a formato 606
-          const entries: Report606Entry[] = processedExpenses.map((expense, index) => ({
-            line: index + 1,
-            date: typeof expense.date === "string" ? expense.date : format(expense.date, "yyyy-MM-dd"),
-            rnc: expense.supplier.rnc,
-            supplierName: expense.supplier.name,
-            docType: expense.docType === "Factura" ? "01" : "02",
-            ncf: expense.ncf,
-            ncfModified: expense.ncfModified || "",
-            baseAmount: expense.baseAmount || 0,
-            itbisAmount: expense.itbisAmount || 0,
-            itbisRetenido: 0,
-            itbisPercibido: 0,
-            isr: 0,
-            paymentMethod: expense.paymentMethod === "Efectivo" ? "01" : "02",
-          }))
-
-          setReportEntries(entries)
-
-          // Calcular resumen
-          const summary: Report606Summary = {
-            period: selectedPeriod,
-            startDate,
-            endDate,
-            totalRecords: entries.length,
-            totalAmount: entries.reduce((sum, entry) => sum + entry.baseAmount + entry.itbisAmount, 0),
-            totalBaseAmount: entries.reduce((sum, entry) => sum + entry.baseAmount, 0),
-            totalItbisAmount: entries.reduce((sum, entry) => sum + entry.itbisAmount, 0),
-            totalItbisRetenido: entries.reduce((sum, entry) => sum + (entry.itbisRetenido || 0), 0),
-            totalItbisPercibido: entries.reduce((sum, entry) => sum + (entry.itbisPercibido || 0), 0),
-            totalIsr: entries.reduce((sum, entry) => sum + (entry.isr || 0), 0),
-          }
-
-          setReportSummary(summary)
-        }
-      } catch (error) {
-        console.error("Error al cargar datos del reporte:", error)
-        if (isMounted) {
-          toast({
-            title: "Error",
-            description: "No se pudieron cargar los datos del reporte. Intente nuevamente.",
-            variant: "destructive",
-          })
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false)
-        }
-      }
-    }
-
-    fetchData()
-
-    // Función de limpieza para evitar actualizaciones de estado en componentes desmontados
-    return () => {
-      isMounted = false
-    }
-  }, [startDate, endDate, selectedPeriod, filters, toast])
-
-  // Modificar la función loadReportData para que sea más simple y solo se use para el botón de actualizar
+  // Función para cargar datos del reporte
   const loadReportData = useCallback(async () => {
     if (!startDate || !endDate) return
 
     setLoading(true)
+    setError(null)
+
     try {
-      // En un caso real, estos datos vendrían de Supabase
       const supabase = createClient()
 
-      // Simulamos una carga de datos
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      // Obtener el usuario actual
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser()
 
-      // Datos de ejemplo - usar los mismos datos que en el useEffect
-      const mockExpenses: Expense[] = [
-        {
-          id: "1",
-          date: new Date(startDate.getTime() + 2 * 24 * 60 * 60 * 1000),
-          supplier: {
-            id: "1",
-            name: "Proveedor 1",
-            rnc: "123456789",
-          },
-          ncf: "B0100000001",
-          description: "Compra de materiales",
-          category: "Bienes",
-          amount: 11800,
-          itbisIncluded: true,
-          hasItbis: true,
-          paymentMethod: "Efectivo",
-          status: "paid",
-          docType: "Factura",
-        },
-        {
-          id: "2",
-          date: new Date(startDate.getTime() + 5 * 24 * 60 * 60 * 1000),
-          supplier: {
-            id: "2",
-            name: "Proveedor 2",
-            rnc: "987654321",
-          },
-          ncf: "B0100000002",
-          description: "Servicios profesionales",
-          category: "Servicios",
-          amount: 5900,
-          itbisIncluded: true,
-          hasItbis: true,
-          paymentMethod: "Cheques/Transferencias/Depósito",
-          status: "paid",
-          docType: "Factura",
-        },
-      ]
+      if (userError) {
+        console.error("Error al obtener usuario:", userError)
+        throw new Error("No se pudo obtener la información del usuario")
+      }
+
+      if (!user) {
+        console.warn("No hay usuario autenticado, usando configuración por defecto")
+        setLoading(false)
+        return
+      }
+
+      const userId = user.id
+
+      // Formatear fechas para la consulta
+      const startDateStr = format(startDate, "yyyy-MM-dd")
+      const endDateStr = format(endDate, "yyyy-MM-dd")
+
+      // Consultar gastos desde Supabase
+      let query = supabase
+        .from("expenses")
+        .select(`
+          id, 
+          date, 
+          description, 
+          amount, 
+          itbis_included, 
+          has_itbis, 
+          payment_method, 
+          status, 
+          doc_type,
+          ncf,
+          ncf_modified,
+          category,
+          supplier_id,
+          suppliers(id, name, rnc)
+        `)
+        .eq("user_id", userId)
+        .gte("date", startDateStr)
+        .lte("date", endDateStr)
 
       // Aplicar filtros
-      const filteredExpenses = mockExpenses.filter((expense) => {
-        // Filtrar por categoría
-        if (filters.categories.length > 0 && !filters.categories.includes(expense.category)) {
-          return false
-        }
+      if (filters.categories.length > 0) {
+        query = query.in("category", filters.categories)
+      }
 
-        // Filtrar por tipo de documento
-        if (filters.documentTypes.length > 0 && !filters.documentTypes.includes(expense.docType)) {
-          return false
-        }
+      if (filters.documentTypes.length > 0) {
+        query = query.in("doc_type", filters.documentTypes)
+      }
 
-        // Filtrar por método de pago
-        if (filters.paymentMethods.length > 0 && !filters.paymentMethods.includes(expense.paymentMethod)) {
-          return false
-        }
+      if (filters.paymentMethods.length > 0) {
+        query = query.in("payment_method", filters.paymentMethods)
+      }
 
-        // Filtrar por proveedor
-        if (filters.suppliers.length > 0 && !filters.suppliers.includes(expense.supplier.id)) {
-          return false
-        }
+      if (filters.suppliers.length > 0) {
+        query = query.in("supplier_id", filters.suppliers)
+      }
 
-        // Filtrar por estado
-        if (filters.status.length > 0 && !filters.status.includes(expense.status)) {
-          return false
-        }
+      if (filters.status.length > 0) {
+        query = query.in("status", filters.status)
+      }
 
-        return true
-      })
+      const { data: expensesData, error: expensesError } = await query
+
+      if (expensesError) throw expensesError
+
+      if (!expensesData || expensesData.length === 0) {
+        setExpenses([])
+        setReportEntries([])
+        setReportSummary({
+          period: selectedPeriod,
+          startDate,
+          endDate,
+          totalRecords: 0,
+          totalAmount: 0,
+          totalBaseAmount: 0,
+          totalItbisAmount: 0,
+          totalItbisRetenido: 0,
+          totalItbisPercibido: 0,
+          totalIsr: 0,
+        })
+        return
+      }
+
+      // Transformar datos de la base de datos al formato de la aplicación
+      const processedExpenses: Expense[] = expensesData.map((expense: any) => ({
+        id: expense.id as string,
+        date: new Date(expense.date),
+        supplier: {
+          id: expense.suppliers?.id || "",
+          name: expense.suppliers?.name || "Proveedor Desconocido",
+          rnc: expense.suppliers?.rnc || "000000000",
+        },
+        ncf: expense.ncf || "",
+        ncfModified: expense.ncf_modified || "",
+        description: expense.description || "",
+        category: expense.category || "",
+        amount: expense.amount || 0,
+        itbisIncluded: expense.itbis_included || false,
+        hasItbis: expense.has_itbis || false,
+        paymentMethod: expense.payment_method || "",
+        status: (expense.status as "paid" | "pending" | "cancelled") || "paid",
+        docType: expense.doc_type || "",
+      }))
 
       // Calcular montos base e ITBIS
-      const processedExpenses = filteredExpenses.map((expense) => {
+      const expensesWithCalculations = processedExpenses.map((expense) => {
         if (expense.hasItbis) {
           if (expense.itbisIncluded) {
-            const baseAmount = +(expense.amount / 1.18).toFixed(2)
-            const itbisAmount = +(expense.amount - baseAmount).toFixed(2)
+            // Si el ITBIS está incluido, calculamos el monto base dividiendo entre 1.18
+            const baseAmount = Number((expense.amount / 1.18).toFixed(2))
+            const itbisAmount = Number((expense.amount - baseAmount).toFixed(2))
             return { ...expense, baseAmount, itbisAmount }
           } else {
+            // Si el ITBIS no está incluido, el monto base es el monto original
             const baseAmount = expense.amount
-            const itbisAmount = +(baseAmount * 0.18).toFixed(2)
+            const itbisAmount = Number((baseAmount * 0.18).toFixed(2))
             return { ...expense, baseAmount, itbisAmount }
           }
         } else {
+          // Si no tiene ITBIS, el monto base es el monto total y el ITBIS es 0
           return { ...expense, baseAmount: expense.amount, itbisAmount: 0 }
         }
       })
 
-      setExpenses(processedExpenses)
+      setExpenses(expensesWithCalculations)
 
       // Convertir a formato 606
-      const entries: Report606Entry[] = processedExpenses.map((expense, index) => ({
+      const entries: Report606Entry[] = expensesWithCalculations.map((expense, index) => ({
         line: index + 1,
-        date: typeof expense.date === "string" ? expense.date : format(expense.date, "yyyy-MM-dd"),
+        date: format(new Date(expense.date), "yyyy-MM-dd"),
         rnc: expense.supplier.rnc,
         supplierName: expense.supplier.name,
-        docType: expense.docType === "Factura" ? "01" : "02",
+        docType: docTypeMapping[expense.docType] || "01",
         ncf: expense.ncf,
         ncfModified: expense.ncfModified || "",
         baseAmount: expense.baseAmount || 0,
@@ -541,7 +514,7 @@ export function Report606() {
         itbisRetenido: 0,
         itbisPercibido: 0,
         isr: 0,
-        paymentMethod: expense.paymentMethod === "Efectivo" ? "01" : "02",
+        paymentMethod: paymentMethodMapping[expense.paymentMethod] || "01",
       }))
 
       setReportEntries(entries)
@@ -561,8 +534,14 @@ export function Report606() {
       }
 
       setReportSummary(summary)
+
+      toast({
+        title: "Datos actualizados",
+        description: `Se cargaron ${entries.length} registros para el período seleccionado.`,
+      })
     } catch (error) {
       console.error("Error al cargar datos del reporte:", error)
+      setError("No se pudieron cargar los datos del reporte. Intente nuevamente.")
       toast({
         title: "Error",
         description: "No se pudieron cargar los datos del reporte. Intente nuevamente.",
@@ -571,147 +550,15 @@ export function Report606() {
     } finally {
       setLoading(false)
     }
-  }, [startDate, endDate, selectedPeriod, filters, toast])
+  }, [selectedPeriod, startDate, endDate, filters, toast])
 
-  // Cargar datos del reporte
-  // const loadReportData = async () => {
-  //   if (!startDate || !endDate) return
-
-  //   try {
-  //     // En un caso real, estos datos vendrían de Supabase
-  //     const supabase = createClient()
-
-  //     // Simulamos una carga de datos
-  //     await new Promise((resolve) => setTimeout(resolve, 1000))
-
-  //     // Datos de ejemplo
-  //     const mockExpenses: Expense[] = [
-  //       {
-  //         id: "1",
-  //         date: new Date(startDate.getTime() + 2 * 24 * 60 * 60 * 1000),
-  //         supplier: {
-  //           id: "1",
-  //           name: "Proveedor 1",
-  //           rnc: "123456789",
-  //         },
-  //         ncf: "B0100000001",
-  //         description: "Compra de materiales",
-  //         category: "Bienes",
-  //         amount: 11800,
-  //         itbisIncluded: true,
-  //         hasItbis: true,
-  //         paymentMethod: "Efectivo",
-  //         status: "paid",
-  //         docType: "Factura",
-  //       },
-  //       {
-  //         id: "2",
-  //         date: new Date(startDate.getTime() + 5 * 24 * 60 * 60 * 1000),
-  //         supplier: {
-  //           id: "2",
-  //           name: "Proveedor 2",
-  //           rnc: "987654321",
-  //         },
-  //         ncf: "B0100000002",
-  //         description: "Servicios profesionales",
-  //         category: "Servicios",
-  //         amount: 5900,
-  //         itbisIncluded: true,
-  //         hasItbis: true,
-  //         paymentMethod: "Cheques/Transferencias/Depósito",
-  //         status: "paid",
-  //         docType: "Factura",
-  //       },
-  //     ]
-
-  //     // Aplicar filtros
-  //     const filteredExpenses = mockExpenses.filter((expense) => {
-  //       // Filtrar por categoría
-  //       if (filters.categories.length > 0 && !filters.categories.includes(expense.category)) {
-  //         return false
-  //       }
-
-  //       // Filtrar por tipo de documento
-  //       if (filters.documentTypes.length > 0 && !filters.documentTypes.includes(expense.docType)) {
-  //         return false
-  //       }
-
-  //       // Filtrar por método de pago
-  //       if (filters.paymentMethods.length > 0 && !filters.paymentMethods.includes(expense.paymentMethod)) {
-  //         return false
-  //       }
-
-  //       // Filtrar por proveedor
-  //       if (filters.suppliers.length > 0 && !filters.suppliers.includes(expense.supplier.id)) {
-  //         return false
-  //       }
-
-  //       // Filtrar por estado
-  //       if (filters.status.length > 0 && !filters.status.includes(expense.status)) {
-  //         return false
-  //       }
-
-  //       return true
-  //     })
-
-  //     // Calcular montos base e ITBIS
-  //     const processedExpenses = filteredExpenses.map((expense) => {
-  //       if (expense.hasItbis) {
-  //         if (expense.itbisIncluded) {
-  //           const baseAmount = +(expense.amount / 1.18).toFixed(2)
-  //           const itbisAmount = +(expense.amount - baseAmount).toFixed(2)
-  //           return { ...expense, baseAmount, itbisAmount }
-  //         } else {
-  //           const baseAmount = expense.amount
-  //           const itbisAmount = +(baseAmount * 0.18).toFixed(2)
-  //           return { ...expense, baseAmount, itbisAmount }
-  //         }
-  //       } else {
-  //         return { ...expense, baseAmount: expense.amount, itbisAmount: 0 }
-  //       }
-  //     })
-
-  //     setExpenses(processedExpenses)
-
-  //     // Convertir a formato 606
-  //     const entries: Report606Entry[] = processedExpenses.map((expense, index) => ({
-  //       line: index + 1,
-  //       date: typeof expense.date === "string" ? expense.date : format(expense.date, "yyyy-MM-dd"),
-  //       rnc: expense.supplier.rnc,
-  //       supplierName: expense.supplier.name,
-  //       docType: expense.docType === "Factura" ? "01" : "02",
-  //       ncf: expense.ncf,
-  //       ncfModified: expense.ncfModified || "",
-  //       baseAmount: expense.baseAmount || 0,
-  //       itbisAmount: expense.itbisAmount || 0,
-  //       itbisRetenido: 0,
-  //       itbisPercibido: 0,
-  //       isr: 0,
-  //       paymentMethod: expense.paymentMethod === "Efectivo" ? "01" : "02",
-  //     }))
-
-  //     setReportEntries(entries)
-
-  //     // Calcular resumen
-  //     const summary: Report606Summary = {
-  //       period: selectedPeriod,
-  //       startDate,
-  //       endDate,
-  //       totalRecords: entries.length,
-  //       totalAmount: entries.reduce((sum, entry) => sum + entry.baseAmount + entry.itbisAmount, 0),
-  //       totalBaseAmount: entries.reduce((sum, entry) => sum + entry.baseAmount, 0),
-  //       totalItbisAmount: entries.reduce((sum, entry) => sum + entry.itbisAmount, 0),
-  //       totalItbisRetenido: entries.reduce((sum, entry) => sum + (entry.itbisRetenido || 0), 0),
-  //       totalItbisPercibido: entries.reduce((sum, entry) => sum + (entry.itbisPercibido || 0), 0),
-  //       totalIsr: entries.reduce((sum, entry) => sum + (entry.isr || 0), 0),
-  //     }
-
-  //     setReportSummary(summary)
-  //   } catch (error) {
-  //     console.error("Error al cargar datos del reporte:", error)
-  //     throw error
-  //   }
-  // }
+  // Efecto para cargar datos cuando cambian las fechas o filtros
+  useEffect(() => {
+    // Solo cargar datos si tenemos un período seleccionado
+    if (selectedPeriod && startDate && endDate) {
+      loadReportData()
+    }
+  }, [selectedPeriod, startDate, endDate, filters, loadReportData])
 
   // Manejar cambio de período
   const handlePeriodChange = (value: string) => {
@@ -839,6 +686,16 @@ export function Report606() {
       )
     }
 
+    if (error) {
+      return (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )
+    }
+
     if (!reportEntries.length) {
       return (
         <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -881,9 +738,7 @@ export function Report606() {
           <tbody>
             {reportEntries.map((entry) => {
               const expense = expenses.find(
-                (e) =>
-                  e.ncf === entry.ncf &&
-                  (typeof e.date === "string" ? e.date : format(e.date, "yyyy-MM-dd")) === entry.date,
+                (e) => e.ncf === entry.ncf && format(new Date(e.date), "yyyy-MM-dd") === entry.date,
               )
 
               const isUnpaid = expense?.status === "pending" && customization.highlightUnpaid
@@ -1115,7 +970,7 @@ export function Report606() {
             <TabsContent value="filters" className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <Label className="mb-2 block">Categor��as</Label>
+                  <Label className="mb-2 block">Categorías</Label>
                   <div className="max-h-40 overflow-y-auto border rounded-md p-2">
                     {availableFilters.categories.map((category) => (
                       <div key={category} className="flex items-center space-x-2 py-1">
@@ -1436,27 +1291,26 @@ export function Report606() {
 
       {/* Estilos para impresión */}
       <style jsx global>{`
-        @media print {
-          body * {
-            visibility: hidden;
-          }
-          #report-606-content,
-          #report-606-content * {
-            visibility: visible;
-          }
-          #report-606-content {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-          }
-          .printing {
-            background-color: white !important;
-            color: black !important;
-          }
-        }
-      `}</style>
+       @media print {
+         body * {
+           visibility: hidden;
+         }
+         #report-606-content,
+         #report-606-content * {
+           visibility: visible;
+         }
+         #report-606-content {
+           position: absolute;
+           left: 0;
+           top: 0;
+           width: 100%;
+         }
+         .printing {
+           background-color: white !important;
+           color: black !important;
+         }
+       }
+     `}</style>
     </div>
   )
 }
-

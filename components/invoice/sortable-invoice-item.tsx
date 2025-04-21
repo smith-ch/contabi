@@ -84,4 +84,3 @@ export function SortableInvoiceItem({ invoice, client, status }: SortableInvoice
     </motion.div>
   )
 }
-

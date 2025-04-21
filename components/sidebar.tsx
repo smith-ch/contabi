@@ -321,5 +321,3 @@ export function Sidebar({ className }: SidebarProps) {
     </div>
   )
 }
-
-

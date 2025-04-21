@@ -1,8 +1,9 @@
 "use client"
 
 import type React from "react"
+
 import { useEffect, useState } from "react"
-import { useRouter, usePathname } from "next/navigation" // Importa usePathname
+import { useRouter } from "next/navigation"
 import { Sidebar } from "@/components/dashboard/sidebar"
 import { Header } from "@/components/dashboard/header"
 import type { User } from "@/lib/db"
@@ -16,7 +17,6 @@ export default function DashboardLayout({
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
-  const pathname = usePathname() // Obtén la ruta actual con usePathname()
 
   useEffect(() => {
     // Verificar si el usuario está autenticado
@@ -59,7 +59,7 @@ export default function DashboardLayout({
         <Sidebar />
         <AnimatePresence mode="wait">
           <motion.main
-            key={pathname} // Usa pathname aquí
+            key={router.asPath}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}

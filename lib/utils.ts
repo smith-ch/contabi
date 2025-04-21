@@ -39,4 +39,3 @@ export function getNextDueDate(date: Date, days = 15): Date {
   dueDate.setDate(dueDate.getDate() + days)
   return dueDate
 }
-

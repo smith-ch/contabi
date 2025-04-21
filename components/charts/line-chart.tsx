@@ -127,4 +127,3 @@ export function LineChart({ data, title, height = 300 }: LineChartProps) {
 
   return <canvas ref={chartRef} height={height} />
 }
-

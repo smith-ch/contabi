@@ -239,4 +239,3 @@ export function InvoicePreview({ config }: InvoicePreviewProps) {
     </div>
   )
 }
-

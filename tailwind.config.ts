@@ -23,35 +23,35 @@ const config = {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
-        background: "hsl(var(--background))",
-        foreground: "hsl(var(--foreground))",
+        background: "#f9fafb", // Gray 50
+        foreground: "#1e293b", // Gray 800
         primary: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))",
+          DEFAULT: "#2563eb", // Blue 600
+          foreground: "#ffffff", // White
         },
         secondary: {
-          DEFAULT: "hsl(var(--secondary))",
-          foreground: "hsl(var(--secondary-foreground))",
+          DEFAULT: "#e5e7eb", // Gray 200
+          foreground: "#374151", // Gray 700
         },
         destructive: {
-          DEFAULT: "hsl(var(--destructive))",
-          foreground: "hsl(var(--destructive-foreground))",
+          DEFAULT: "#dc2626", // Red 600
+          foreground: "#ffffff", // White
         },
         muted: {
-          DEFAULT: "hsl(var(--muted))",
-          foreground: "hsl(var(--muted-foreground))",
+          DEFAULT: "#f3f4f6", // Gray 100
+          foreground: "#4b5563", // Gray 600
         },
         accent: {
-          DEFAULT: "hsl(var(--accent))",
-          foreground: "hsl(var(--accent-foreground))",
+          DEFAULT: "#d1d5db", // Gray 300
+          foreground: "#111827", // Gray 900
         },
         popover: {
-          DEFAULT: "hsl(var(--popover))",
-          foreground: "hsl(var(--popover-foreground))",
+          DEFAULT: "#ffffff", // White
+          foreground: "#1e293b", // Gray 800
         },
         card: {
-          DEFAULT: "hsl(var(--card))",
-          foreground: "hsl(var(--card-foreground))",
+          DEFAULT: "#ffffff", // White
+          foreground: "#1e293b", // Gray 800
         },
       },
       borderRadius: {
@@ -114,4 +114,3 @@ const config = {
 } satisfies Config
 
 export default config
-

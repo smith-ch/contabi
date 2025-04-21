@@ -12,9 +12,10 @@ import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Separator } from "@/components/ui/separator"
-import { Save } from "lucide-react"
+import { Save, AlertCircle } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { createClient } from "@/lib/supabase-client"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 interface InvoiceCustomizationSettings {
   id?: string
@@ -49,6 +50,40 @@ interface InvoiceCustomizationSettings {
   updatedAt?: string
 }
 
+// Interfaz para los datos de Supabase
+interface SupabaseInvoiceSettings {
+  id: string
+  user_id: string
+  company_name: string | null
+  company_logo: string | null
+  company_address: string | null
+  company_phone: string | null
+  company_email: string | null
+  company_rnc: string | null
+  primary_color: string | null
+  secondary_color: string | null
+  font_family: string | null
+  font_size: number | null
+  show_logo: boolean | null
+  show_footer: boolean | null
+  footer_text: string | null
+  show_watermark: boolean | null
+  watermark_text: string | null
+  show_signature: boolean | null
+  signature_image: string | null
+  signature_name: string | null
+  signature_title: string | null
+  show_qr_code: boolean | null
+  show_barcodes: boolean | null
+  show_payment_info: boolean | null
+  bank_name: string | null
+  bank_account: string | null
+  payment_instructions: string | null
+  terms_and_conditions: string | null
+  created_at: string
+  updated_at: string
+}
+
 const defaultSettings: InvoiceCustomizationSettings = {
   userId: "current-user", // Esto debería venir de la autenticación
   companyName: "Mi Empresa",
@@ -56,8 +91,8 @@ const defaultSettings: InvoiceCustomizationSettings = {
   companyPhone: "(809) 555-1234",
   companyEmail: "info@miempresa.com",
   companyRNC: "123456789",
-  primaryColor: "#3b82f6",
-  secondaryColor: "#6b7280",
+  primaryColor: "#0ea5e9", // Sky Blue 500
+  secondaryColor: "#475569", // Slate 700
   fontFamily: "Inter",
   fontSize: 12,
   showLogo: true,
@@ -81,6 +116,7 @@ export function InvoiceCustomizer() {
   const [settings, setSettings] = useState<InvoiceCustomizationSettings>(defaultSettings)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [signatureFile, setSignatureFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -90,31 +126,101 @@ export function InvoiceCustomizer() {
   useEffect(() => {
     const loadSettings = async () => {
       setLoading(true)
+      setError(null)
       try {
         const supabase = createClient()
-        const { data, error } = await supabase
-          .from("invoice_settings")
-          .select("*")
-          .eq("userId", settings.userId)
-          .single()
 
-        if (error) {
-          console.error("Error al cargar configuración:", error)
+        // Obtener el usuario actual
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser()
+
+        if (userError) {
+          console.error("Error al obtener usuario:", userError)
+          throw new Error("No se pudo obtener la información del usuario")
+        }
+
+        if (!user) {
+          console.warn("No hay usuario autenticado, usando configuración por defecto")
+          setLoading(false)
           return
         }
 
+        // Actualizar el userId con el ID real del usuario
+        setSettings((prev) => ({
+          ...prev,
+          userId: user.id,
+        }))
+
+        // Buscar configuración existente
+        const { data, error } = await supabase.from("invoice_settings").select("*").eq("user_id", user.id).maybeSingle()
+
+        if (error) {
+          console.error("Error al cargar configuración:", error)
+          throw error
+        }
+
         if (data) {
-          setSettings(data as unknown as InvoiceCustomizationSettings)
+          // Convertir datos de la base de datos al formato de la aplicación
+          const dbData = data as SupabaseInvoiceSettings
+
+          const loadedSettings: InvoiceCustomizationSettings = {
+            id: dbData.id,
+            userId: dbData.user_id,
+            companyName: dbData.company_name || defaultSettings.companyName,
+            companyLogo: dbData.company_logo || undefined,
+            companyAddress: dbData.company_address || defaultSettings.companyAddress,
+            companyPhone: dbData.company_phone || defaultSettings.companyPhone,
+            companyEmail: dbData.company_email || defaultSettings.companyEmail,
+            companyRNC: dbData.company_rnc || defaultSettings.companyRNC,
+            primaryColor: dbData.primary_color || defaultSettings.primaryColor,
+            secondaryColor: dbData.secondary_color || defaultSettings.secondaryColor,
+            fontFamily: dbData.font_family || defaultSettings.fontFamily,
+            fontSize: dbData.font_size || defaultSettings.fontSize,
+            showLogo: dbData.show_logo !== null ? dbData.show_logo : defaultSettings.showLogo,
+            showFooter: dbData.show_footer !== null ? dbData.show_footer : defaultSettings.showFooter,
+            footerText: dbData.footer_text || defaultSettings.footerText,
+            showWatermark: dbData.show_watermark !== null ? dbData.show_watermark : defaultSettings.showWatermark,
+            watermarkText: dbData.watermark_text || defaultSettings.watermarkText,
+            showSignature: dbData.show_signature !== null ? dbData.show_signature : defaultSettings.showSignature,
+            signatureImage: dbData.signature_image || undefined,
+            signatureName: dbData.signature_name || defaultSettings.signatureName,
+            signatureTitle: dbData.signature_title || defaultSettings.signatureTitle,
+            showQRCode: dbData.show_qr_code !== null ? dbData.show_qr_code : defaultSettings.showQRCode,
+            showBarcodes: dbData.show_barcodes !== null ? dbData.show_barcodes : defaultSettings.showBarcodes,
+            showPaymentInfo:
+              dbData.show_payment_info !== null ? dbData.show_payment_info : defaultSettings.showPaymentInfo,
+            bankName: dbData.bank_name || defaultSettings.bankName,
+            bankAccount: dbData.bank_account || defaultSettings.bankAccount,
+            paymentInstructions: dbData.payment_instructions || defaultSettings.paymentInstructions,
+            termsAndConditions: dbData.terms_and_conditions || defaultSettings.termsAndConditions,
+            createdAt: dbData.created_at,
+            updatedAt: dbData.updated_at,
+          }
+
+          setSettings(loadedSettings)
+
+          toast({
+            title: "Configuración cargada",
+            description: "Se ha cargado la configuración guardada anteriormente.",
+          })
         }
       } catch (error) {
         console.error("Error al cargar configuración:", error)
+        setError("No se pudo cargar la configuración guardada. Por favor intente nuevamente.")
+        toast({
+          title: "Error",
+          description: "No se pudo cargar la configuración guardada.",
+          variant: "destructive",
+        })
       } finally {
         setLoading(false)
       }
     }
 
     loadSettings()
-  }, [])
+  }, [toast])
 
   // Manejar cambios en los campos
   const handleChange = (field: keyof InvoiceCustomizationSettings, value: any) => {
@@ -161,66 +267,131 @@ export function InvoiceCustomizer() {
   // Guardar configuración
   const saveSettings = async () => {
     setSaving(true)
+    setError(null)
     try {
       const supabase = createClient()
 
+      // Obtener el usuario actual
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser()
+
+      if (userError) {
+        throw userError
+      }
+
+      if (!user) {
+        throw new Error("No se encontró un usuario autenticado")
+      }
+
+      // Asegurarse de que estamos usando el ID correcto del usuario
+      const userId = user.id
+
       // Subir logo si existe
+      let companyLogoUrl = settings.companyLogo
       if (logoFile) {
+        const fileExt = logoFile.name.split(".").pop()
+        const fileName = `${userId}_logo_${Date.now()}.${fileExt}`
+
         const { data: logoData, error: logoError } = await supabase.storage
           .from("invoice-assets")
-          .upload(`logos/${settings.userId}_${Date.now()}`, logoFile)
+          .upload(`logos/${fileName}`, logoFile)
 
         if (logoError) {
           console.error("Error al subir logo:", logoError)
+          throw logoError
         } else {
           // Obtener URL pública
-          const { data: logoUrl } = supabase.storage.from("invoice-assets").getPublicUrl(logoData.path)
+          const { data: logoUrl } = supabase.storage.from("invoice-assets").getPublicUrl(`logos/${fileName}`)
 
           if (logoUrl) {
-            handleChange("companyLogo", logoUrl.publicUrl)
+            companyLogoUrl = logoUrl.publicUrl
           }
         }
       }
 
       // Subir firma si existe
+      let signatureImageUrl = settings.signatureImage
       if (signatureFile) {
+        const fileExt = signatureFile.name.split(".").pop()
+        const fileName = `${userId}_signature_${Date.now()}.${fileExt}`
+
         const { data: signatureData, error: signatureError } = await supabase.storage
           .from("invoice-assets")
-          .upload(`signatures/${settings.userId}_${Date.now()}`, signatureFile)
+          .upload(`signatures/${fileName}`, signatureFile)
 
         if (signatureError) {
           console.error("Error al subir firma:", signatureError)
+          throw signatureError
         } else {
           // Obtener URL pública
-          const { data: signatureUrl } = supabase.storage.from("invoice-assets").getPublicUrl(signatureData.path)
+          const { data: signatureUrl } = supabase.storage.from("invoice-assets").getPublicUrl(`signatures/${fileName}`)
 
           if (signatureUrl) {
-            handleChange("signatureImage", signatureUrl.publicUrl)
+            signatureImageUrl = signatureUrl.publicUrl
           }
         }
       }
 
+      // Convertir datos al formato de la base de datos
+      const dbSettings = {
+        user_id: userId,
+        company_name: settings.companyName,
+        company_logo: companyLogoUrl,
+        company_address: settings.companyAddress,
+        company_phone: settings.companyPhone,
+        company_email: settings.companyEmail,
+        company_rnc: settings.companyRNC,
+        primary_color: settings.primaryColor,
+        secondary_color: settings.secondaryColor,
+        font_family: settings.fontFamily,
+        font_size: settings.fontSize,
+        show_logo: settings.showLogo,
+        show_footer: settings.showFooter,
+        footer_text: settings.footerText,
+        show_watermark: settings.showWatermark,
+        watermark_text: settings.watermarkText,
+        show_signature: settings.showSignature,
+        signature_image: signatureImageUrl,
+        signature_name: settings.signatureName,
+        signature_title: settings.signatureTitle,
+        show_qr_code: settings.showQRCode,
+        show_barcodes: settings.showBarcodes,
+        show_payment_info: settings.showPaymentInfo,
+        bank_name: settings.bankName,
+        bank_account: settings.bankAccount,
+        payment_instructions: settings.paymentInstructions,
+        terms_and_conditions: settings.termsAndConditions,
+        updated_at: new Date().toISOString(),
+      }
+
       // Guardar configuración
-      const { data, error } = await supabase
-        .from("invoice_settings")
-        .upsert({
-          ...settings,
-          updatedAt: new Date().toISOString(),
-        })
-        .select()
+      let query
+      if (settings.id) {
+        // Actualizar configuración existente
+        query = supabase.from("invoice_settings").update(dbSettings).eq("id", settings.id).select()
+      } else {
+        // Crear nueva configuración
+        query = supabase.from("invoice_settings").insert(dbSettings).select()
+      }
+
+      const { data, error } = await query
 
       if (error) {
         console.error("Error al guardar configuración:", error)
-        toast({
-          title: "Error",
-          description: "No se pudo guardar la configuración. Intente nuevamente.",
-          variant: "destructive",
-        })
-        return
+        throw error
       }
 
       if (data && data[0]) {
-        setSettings(data[0] as unknown as InvoiceCustomizationSettings)
+        // Actualizar el ID si es una nueva configuración
+        if (!settings.id) {
+          setSettings((prev) => ({
+            ...prev,
+            id: data[0].id as string,
+          }))
+        }
+
         toast({
           title: "Configuración guardada",
           description: "La personalización de facturas ha sido guardada exitosamente.",
@@ -228,6 +399,7 @@ export function InvoiceCustomizer() {
       }
     } catch (error) {
       console.error("Error al guardar configuración:", error)
+      setError("No se pudo guardar la configuración. Por favor intente nuevamente.")
       toast({
         title: "Error",
         description: "Ocurrió un error al guardar la configuración.",
@@ -240,12 +412,44 @@ export function InvoiceCustomizer() {
 
   // Generar vista previa
   const generatePreview = () => {
-    // Aquí se generaría una vista previa de la factura con la configuración actual
-    setPreviewUrl("/api/invoice-preview?settings=" + encodeURIComponent(JSON.stringify(settings)))
+    // Crear un objeto con solo los datos necesarios para la vista previa
+    const previewSettings = {
+      ...settings,
+      // Convertir las imágenes de base64 a URLs si es necesario
+      companyLogo: settings.companyLogo,
+      signatureImage: settings.signatureImage,
+    }
+
+    // Crear URL para la vista previa
+    setPreviewUrl(`/api/invoice-preview?settings=${encodeURIComponent(JSON.stringify(previewSettings))}`)
+
+    toast({
+      title: "Vista previa generada",
+      description: "Se ha generado una vista previa de la factura con la configuración actual.",
+    })
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="space-y-4 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary mx-auto"></div>
+          <p className="text-muted-foreground">Cargando configuración...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="space-y-6">
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Personalización de Facturas</CardTitle>
@@ -333,8 +537,15 @@ export function InvoiceCustomizer() {
                     <div className="h-8 w-8 rounded border" style={{ backgroundColor: settings.primaryColor }} />
                     <Input
                       id="primaryColor"
+                      type="color"
                       value={settings.primaryColor}
                       onChange={(e) => handleChange("primaryColor", e.target.value)}
+                      className="w-16 p-1 h-8"
+                    />
+                    <Input
+                      value={settings.primaryColor}
+                      onChange={(e) => handleChange("primaryColor", e.target.value)}
+                      className="flex-1"
                     />
                   </div>
                 </div>
@@ -345,8 +556,15 @@ export function InvoiceCustomizer() {
                     <div className="h-8 w-8 rounded border" style={{ backgroundColor: settings.secondaryColor }} />
                     <Input
                       id="secondaryColor"
+                      type="color"
                       value={settings.secondaryColor}
                       onChange={(e) => handleChange("secondaryColor", e.target.value)}
+                      className="w-16 p-1 h-8"
+                    />
+                    <Input
+                      value={settings.secondaryColor}
+                      onChange={(e) => handleChange("secondaryColor", e.target.value)}
+                      className="flex-1"
                     />
                   </div>
                 </div>
@@ -573,7 +791,10 @@ export function InvoiceCustomizer() {
             </Button>
             <Button onClick={saveSettings} disabled={saving}>
               {saving ? (
-                <>Guardando...</>
+                <>
+                  <div className="animate-spin mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
+                  Guardando...
+                </>
               ) : (
                 <>
                   <Save className="mr-2 h-4 w-4" />
@@ -600,4 +821,3 @@ export function InvoiceCustomizer() {
     </div>
   )
 }
-

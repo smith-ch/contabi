@@ -176,6 +176,7 @@ export default function ExpensesPage() {
           description: formData.description,
           amount: Number.parseFloat(formData.amount),
           date: new Date(formData.date),
+          createdAt: new Date(),
         })
 
         setExpenses([...expenses, newExpense])
@@ -421,4 +422,3 @@ export default function ExpensesPage() {
     </div>
   )
 }
-

@@ -59,4 +59,3 @@ export function ToastNotification({ type, message, duration = 5000, onClose }: T
     </div>
   )
 }
-

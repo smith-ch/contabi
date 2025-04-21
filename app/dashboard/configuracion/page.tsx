@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -23,7 +24,7 @@ export default function SettingsPage() {
     rnc: "",
     address: "",
     phone: "",
-    logo: "",  // Esta propiedad debe ser opcional en el User
+    logo: "",
   })
   const [logoUrl, setLogoUrl] = useState<string | null>(null)
   const { toast } = useToast()
@@ -40,7 +41,7 @@ export default function SettingsPage() {
           rnc: userData.rnc || "",
           address: userData.address || "",
           phone: userData.phone || "",
-          logo: userData.logo || "",  // Aquí también debe ser opcional
+          logo: userData.logo || "",
         })
         setLogoUrl(userData.logoUrl || null)
       }
@@ -87,7 +88,7 @@ export default function SettingsPage() {
         rnc: formData.rnc,
         address: formData.address,
         phone: formData.phone,
-         // Ahora es válido porque "logo" está en User
+        logo: formData.logo,
       })
 
       // Actualizar el usuario en localStorage
@@ -204,9 +205,9 @@ export default function SettingsPage() {
                     onFileUploaded={handleFileUploaded}
                     onFileDeleted={handleFileDeleted}
                     initialFilePath={formData.logo}
-                    initialFileUrl={logoUrl ?? undefined} // Evita el error de null
+                    initialFileUrl={logoUrl}
                     allowedTypes={["image/jpeg", "image/png", "image/webp"]}
-                    maxSizeBytes={2 * 1024 * 1024}
+                    maxSizeBytes={2 * 1024 * 1024} // 2MB
                     label="Subir logo"
                     previewSize="medium"
                   />

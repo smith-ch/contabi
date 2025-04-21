@@ -64,6 +64,7 @@ export function RegisterForm() {
         password: formData.password,
         company: formData.company,
         rnc: formData.rnc,
+        createdAt: new Date(),
       })
 
       toast({
@@ -170,4 +171,3 @@ export function RegisterForm() {
     </Card>
   )
 }
-

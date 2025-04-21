@@ -11,7 +11,7 @@ import { CheckCircle2, XCircle, Database, RefreshCw, UserPlus } from "lucide-rea
 interface TableStatus {
   name: string
   exists: boolean
-  count?: number | null
+  count?: number
 }
 
 export default function VerifyDatabasePage() {
@@ -60,7 +60,7 @@ export default function VerifyDatabasePage() {
         rnc: "123456789",
         address: "Calle Principal #123, Santo Domingo",
         phone: "+1809555-1234",
-        // Se eliminó "createdAt" ya que no se permite en el tipo de entrada
+        createdAt: new Date(),
       })
 
       if (testUser) {

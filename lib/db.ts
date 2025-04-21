@@ -1056,4 +1056,3 @@ export async function testSupabaseConnection(): Promise<boolean> {
     return false
   }
 }
-

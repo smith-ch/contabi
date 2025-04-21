@@ -261,4 +261,3 @@ export function printReport(elementId: string): void {
     document.body.removeChild(iframe)
   }, 1000)
 }
-

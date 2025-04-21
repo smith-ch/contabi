@@ -3,9 +3,10 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { supabaseClient } from "@/lib/supabase"
-import { AlertCircle, CheckCircle, Database, RefreshCw } from "lucide-react"
+import { supabaseAdmin } from "@/lib/supabase"
+import { AlertCircle, CheckCircle, Database, RefreshCw, HardDrive } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
+import { initializeStorage } from "@/lib/storage"
 
 export default function FixDatabase() {
   const [loading, setLoading] = useState(false)
@@ -18,7 +19,7 @@ export default function FixDatabase() {
 
     try {
       // Ejecutar script para corregir políticas de RLS para invoices
-      const { error: invoicesError } = await supabaseClient.rpc("fix_invoices_policies")
+      const { error: invoicesError } = await supabaseAdmin.rpc("fix_invoices_policies")
       setResults((prev) => ({ ...prev, invoices: !invoicesError }))
 
       if (invoicesError) {
@@ -26,7 +27,7 @@ export default function FixDatabase() {
       }
 
       // Ejecutar script para corregir políticas de RLS para invoice_items
-      const { error: itemsError } = await supabaseClient.rpc("fix_invoice_items_policies")
+      const { error: itemsError } = await supabaseAdmin.rpc("fix_invoice_items_policies")
       setResults((prev) => ({ ...prev, invoice_items: !itemsError }))
 
       if (itemsError) {
@@ -34,7 +35,7 @@ export default function FixDatabase() {
       }
 
       // Ejecutar script para corregir políticas de RLS para expenses
-      const { error: expensesError } = await supabaseClient.rpc("fix_expenses_policies")
+      const { error: expensesError } = await supabaseAdmin.rpc("fix_expenses_policies")
       setResults((prev) => ({ ...prev, expenses: !expensesError }))
 
       if (expensesError) {
@@ -42,17 +43,34 @@ export default function FixDatabase() {
       }
 
       // Ejecutar script para corregir políticas de RLS para notifications
-      const { error: notificationsError } = await supabaseClient.rpc("fix_notifications_policies")
+      const { error: notificationsError } = await supabaseAdmin.rpc("fix_notifications_policies")
       setResults((prev) => ({ ...prev, notifications: !notificationsError }))
 
       if (notificationsError) {
         console.error("Error al corregir políticas de notificaciones:", notificationsError)
       }
 
+      // Ejecutar script para corregir políticas de almacenamiento
+      const { error: storageError } = await supabaseAdmin.rpc("fix_storage_policies")
+      setResults((prev) => ({ ...prev, storage: !storageError }))
+
+      if (storageError) {
+        console.error("Error al corregir políticas de almacenamiento:", storageError)
+      }
+
+      // Reinicializar almacenamiento
+      try {
+        await initializeStorage()
+        setResults((prev) => ({ ...prev, storage_init: true }))
+      } catch (storageInitError) {
+        console.error("Error al inicializar almacenamiento:", storageInitError)
+        setResults((prev) => ({ ...prev, storage_init: false }))
+      }
+
       toast({
         title: "Corrección completada",
         description: "Se han aplicado las correcciones a la base de datos",
-        
+        variant: "success",
       })
     } catch (error) {
       console.error("Error al corregir la base de datos:", error)
@@ -74,13 +92,13 @@ export default function FixDatabase() {
           Corregir Políticas de Seguridad
         </CardTitle>
         <CardDescription>
-          Corrige las políticas de seguridad de fila (RLS) para permitir la creación de registros
+          Corrige las políticas de seguridad de fila (RLS) y almacenamiento para permitir la creación de registros
         </CardDescription>
       </CardHeader>
       <CardContent>
         <p className="mb-4 text-sm text-muted-foreground">
-          Si estás experimentando errores al crear facturas, gastos o notificaciones, este proceso puede ayudar a
-          corregir las políticas de seguridad en la base de datos.
+          Si estás experimentando errores al crear facturas, gastos, notificaciones o al subir archivos, este proceso
+          puede ayudar a corregir las políticas de seguridad en la base de datos.
         </p>
 
         {Object.keys(results).length > 0 && (
@@ -93,7 +111,12 @@ export default function FixDatabase() {
                   <AlertCircle className="h-5 w-5 text-red-500" />
                 )}
                 <span>
-                  {table}: {success ? "Corregido" : "Error"}
+                  {table === "storage"
+                    ? "Políticas de almacenamiento"
+                    : table === "storage_init"
+                      ? "Inicialización de buckets"
+                      : `Tabla ${table}`}
+                  : {success ? "Corregido" : "Error"}
                 </span>
               </div>
             ))}
@@ -108,11 +131,13 @@ export default function FixDatabase() {
               Corrigiendo...
             </>
           ) : (
-            "Corregir Base de Datos"
+            <>
+              <HardDrive className="mr-2 h-4 w-4" />
+              Corregir Base de Datos y Almacenamiento
+            </>
           )}
         </Button>
       </CardFooter>
     </Card>
   )
 }
-

@@ -117,7 +117,7 @@ export function InvoiceKanban({ invoices, clients, onInvoiceUpdate }: InvoiceKan
           toast({
             title: "Estado actualizado",
             description: `La factura #${invoiceToUpdate.invoiceNumber} ha sido movida a ${getStatusText(newStatus)}`,
-            
+            variant: "success",
           })
         } catch (error) {
           console.error("Error al actualizar estado:", error)
@@ -357,4 +357,3 @@ export function InvoiceKanban({ invoices, clients, onInvoiceUpdate }: InvoiceKan
     </DndContext>
   )
 }
-

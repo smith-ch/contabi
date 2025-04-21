@@ -71,4 +71,3 @@ export function ReportStatus({ status, message, onRetry }: ReportStatusProps) {
 
   return null
 }
-

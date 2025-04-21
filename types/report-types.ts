@@ -88,4 +88,3 @@ export interface CustomizationOptions {
   showTotals: boolean
   fontSize: "small" | "medium" | "large"
 }
-

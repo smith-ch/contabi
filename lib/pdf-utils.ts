@@ -22,79 +22,69 @@ export async function exportToPDF(
       return false
     }
 
-    // Preparar el elemento para la captura
-    const originalStyles = {
-      width: element.style.width,
-      height: element.style.height,
-      overflow: element.style.overflow,
-      position: element.style.position,
-      background: element.style.background,
-    }
+    // Crear un clon del elemento para no modificar el original
+    const clone = element.cloneNode(true) as HTMLElement
 
-    // Aplicar estilos temporales para la captura
-    element.style.width = `${element.scrollWidth}px`
-    element.style.height = `${element.scrollHeight}px`
-    element.style.overflow = "visible"
-    element.style.background = "white"
+    // Establecer estilos para el clon
+    clone.style.width = `${element.scrollWidth}px`
+    clone.style.height = `${element.scrollHeight}px`
+    clone.style.position = "absolute"
+    clone.style.top = "-9999px"
+    clone.style.left = "-9999px"
+    clone.style.overflow = "visible"
+    clone.style.background = "white"
+    clone.classList.add("printing")
 
-    // Aplicar clase de impresión
-    element.classList.add("printing")
+    // Añadir el clon al documento
+    document.body.appendChild(clone)
 
     // Esperar a que los estilos se apliquen
     await new Promise((resolve) => setTimeout(resolve, 100))
 
-    // Configurar opciones para html2canvas
-    const canvas = await html2canvas(element, {
-      scale: scale, // Mayor resolución
-      useCORS: true,
-      logging: false,
-      backgroundColor: "#ffffff",
-      allowTaint: true,
-      windowWidth: element.scrollWidth,
-      windowHeight: element.scrollHeight,
-      onclone: (document, clonedElement) => {
-        // Asegurar que los estilos se apliquen al clon
-        clonedElement.style.width = `${element.scrollWidth}px`
-        clonedElement.style.height = `${element.scrollHeight}px`
-        clonedElement.style.overflow = "visible"
-        clonedElement.style.background = "white"
-        clonedElement.classList.add("printing")
-      },
-    })
+    try {
+      // Configurar opciones para html2canvas
+      const canvas = await html2canvas(clone, {
+        scale: scale, // Mayor resolución
+        useCORS: true,
+        logging: false,
+        backgroundColor: "#ffffff",
+        allowTaint: true,
+        windowWidth: clone.scrollWidth,
+        windowHeight: clone.scrollHeight,
+      })
 
-    // Restaurar estilos originales
-    element.style.width = originalStyles.width
-    element.style.height = originalStyles.height
-    element.style.overflow = originalStyles.overflow
-    element.style.position = originalStyles.position
-    element.style.background = originalStyles.background
-    element.classList.remove("printing")
+      // Configurar dimensiones del PDF
+      const imgData = canvas.toDataURL("image/png", 1.0)
+      const pdf = new jsPDF({
+        orientation: orientation,
+        unit: "mm",
+        format: "a4",
+        compress: true,
+      })
 
-    // Configurar dimensiones del PDF
-    const imgData = canvas.toDataURL("image/png", 1.0)
-    const pdf = new jsPDF({
-      orientation: orientation,
-      unit: "mm",
-      format: "a4",
-      compress: true,
-    })
+      const pdfWidth = orientation === "landscape" ? 297 : 210
+      const pdfHeight = orientation === "landscape" ? 210 : 297
 
-    const pdfWidth = orientation === "landscape" ? 297 : 210
-    const pdfHeight = orientation === "landscape" ? 210 : 297
+      const imgWidth = canvas.width
+      const imgHeight = canvas.height
 
-    const imgWidth = canvas.width
-    const imgHeight = canvas.height
+      // Calcular la escala para ajustar el contenido al PDF
+      const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight) * 0.95
 
-    // Calcular la escala para ajustar el contenido al PDF
-    const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight) * 0.95
+      const imgX = (pdfWidth - imgWidth * ratio) / 2
+      const imgY = 10 // Margen superior
 
-    const imgX = (pdfWidth - imgWidth * ratio) / 2
-    const imgY = 10 // Margen superior
+      pdf.addImage(imgData, "PNG", imgX, imgY, imgWidth * ratio, imgHeight * ratio)
 
-    pdf.addImage(imgData, "PNG", imgX, imgY, imgWidth * ratio, imgHeight * ratio)
-
-    pdf.save(fileName)
-    return true
+      pdf.save(fileName)
+      return true
+    } catch (error) {
+      console.error("Error al generar el canvas:", error)
+      throw error
+    } finally {
+      // Eliminar el clon después de capturar
+      document.body.removeChild(clone)
+    }
   } catch (error) {
     console.error("Error al exportar a PDF:", error)
     return false
@@ -136,6 +126,9 @@ export function printElement(elementId: string): boolean {
         }
       })
       .join("\n")
+
+    // Clonar el elemento para no modificar el original
+    const clone = element.cloneNode(true) as HTMLElement
 
     // Agregar estilos de impresión
     iframeDoc.write(`
@@ -182,7 +175,7 @@ export function printElement(elementId: string): boolean {
           </style>
         </head>
         <body>
-          ${element.outerHTML}
+          ${clone.outerHTML}
         </body>
       </html>
     `)
@@ -206,4 +199,3 @@ export function printElement(elementId: string): boolean {
     return false
   }
 }
-

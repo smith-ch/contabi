@@ -19,4 +19,3 @@ BEGIN
     AND c.table_schema = 'public';
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
-

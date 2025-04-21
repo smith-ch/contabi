@@ -105,4 +105,3 @@ BEGIN
       ON public.notifications FOR DELETE 
       USING (auth.uid()::text = user_id OR auth.uid() IS NULL);
 END $$;
-

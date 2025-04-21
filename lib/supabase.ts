@@ -81,4 +81,3 @@ export type Tables = {
     created_at: string
   }
 }
-

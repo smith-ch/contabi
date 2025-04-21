@@ -1,4 +1,4 @@
-import {Report606} from "@/components/reports/report-606"
+import { Report606 } from "@/components/reports/report-606"
 
 export default function Report606Page() {
   return (
@@ -14,4 +14,3 @@ export default function Report606Page() {
     </div>
   )
 }
-

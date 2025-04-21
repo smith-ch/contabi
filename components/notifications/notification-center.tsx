@@ -70,12 +70,14 @@ export function NotificationCenter() {
       toast({
         title: "Notificaciones marcadas como leídas",
         description: "Todas las notificaciones han sido marcadas como leídas",
+        variant: "success",
       })
     } catch (error) {
       console.error("Error al marcar notificaciones como leídas:", error)
       toast({
         title: "Error",
         description: "No se pudieron marcar las notificaciones como leídas",
+        variant: "destructive",
       })
     }
   }
@@ -93,6 +95,7 @@ export function NotificationCenter() {
       toast({
         title: "Notificaciones eliminadas",
         description: "Todas las notificaciones han sido eliminadas",
+        variant: "success",
       })
     } catch (error) {
       console.error("Error al eliminar notificaciones:", error)
@@ -202,4 +205,3 @@ export function NotificationCenter() {
     </Sheet>
   )
 }
-
