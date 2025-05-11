@@ -3,42 +3,93 @@
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardDescription, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { getInvoicesByUserId, getExpensesByUserId, type Invoice, type Expense, checkOverdueInvoices } from "@/lib/db"
 import { BarChartIcon, DollarSign, Users, FileText, Receipt } from "lucide-react"
 import { formatCurrency } from "@/lib/utils"
 import { BarChart } from "@/components/charts/bar-chart"
+import { PieChart } from "@/components/charts/pie-chart"
 import { useTheme } from "next-themes"
 import { motion } from "framer-motion"
-import { SupabaseStatus } from "@/components/supabase-status"
+import { ErrorBoundary } from "@/components/ui/error-boundary"
+import { ChartSkeleton } from "@/components/ui/chart-skeleton"
+import { NoData } from "@/components/ui/no-data"
+import { createClient } from "@supabase/supabase-js"
+
+// Tipos
+interface Invoice {
+  id: string
+  invoiceNumber: string
+  date: Date
+  total: number
+  status: string
+}
+
+interface Expense {
+  id: string
+  date: Date
+  description: string
+  amount: number
+  category: string
+}
 
 export default function DashboardPage() {
   const [user, setUser] = useState<any>(null)
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const { resolvedTheme } = useTheme()
   const isDark = resolvedTheme === "dark"
 
   useEffect(() => {
     const loadData = async () => {
       try {
+        setLoading(true)
+
+        // Obtener usuario actual
         const storedUser = localStorage.getItem("currentUser")
-        if (!storedUser) return
+        if (!storedUser) {
+          setError("No se encontró información del usuario")
+          return
+        }
 
         const userData = JSON.parse(storedUser)
         setUser(userData)
 
-        // Verificar facturas vencidas
-        await checkOverdueInvoices(userData.id)
+        // Inicializar cliente Supabase
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
+        const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+        const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-        // Cargar facturas y gastos
-        const userInvoices = await getInvoicesByUserId(userData.id)
-        const userExpenses = await getExpensesByUserId(userData.id)
+        // Cargar facturas
+        const { data: invoicesData, error: invoicesError } = await supabase
+          .from("invoices")
+          .select("*")
+          .eq("user_id", userData.id)
+          .order("date", { ascending: false })
 
-        setInvoices(userInvoices)
-        setExpenses(userExpenses)
+        if (invoicesError) {
+          console.error("Error al cargar facturas:", invoicesError)
+          throw new Error("Error al cargar facturas")
+        }
+
+        // Cargar gastos
+        const { data: expensesData, error: expensesError } = await supabase
+          .from("expenses")
+          .select("*")
+          .eq("user_id", userData.id)
+          .order("date", { ascending: false })
+
+        if (expensesError) {
+          console.error("Error al cargar gastos:", expensesError)
+          throw new Error("Error al cargar gastos")
+        }
+
+        // Procesar datos
+        setInvoices(invoicesData || [])
+        setExpenses(expensesData || [])
       } catch (error) {
         console.error("Error al cargar datos:", error)
+        setError(error instanceof Error ? error.message : "Error desconocido")
       } finally {
         setLoading(false)
       }
@@ -46,14 +97,6 @@ export default function DashboardPage() {
 
     loadData()
   }, [])
-
-  if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary"></div>
-      </div>
-    )
-  }
 
   // Calcular estadísticas
   const totalInvoices = invoices.length
@@ -82,15 +125,90 @@ export default function DashboardPage() {
     return dayExpenses.reduce((sum, exp) => sum + exp.amount, 0)
   })
 
+  // Datos para gráfico de categorías de gastos
+  const expenseCategories = expenses.reduce(
+    (acc, expense) => {
+      const category = expense.category || "Sin categoría"
+      acc[category] = (acc[category] || 0) + expense.amount
+      return acc
+    },
+    {} as Record<string, number>,
+  )
+
+  const categoryLabels = Object.keys(expenseCategories)
+  const categoryData = Object.values(expenseCategories)
+  const categoryColors = [
+    "rgba(54, 162, 235, 0.7)",
+    "rgba(255, 99, 132, 0.7)",
+    "rgba(255, 206, 86, 0.7)",
+    "rgba(75, 192, 192, 0.7)",
+    "rgba(153, 102, 255, 0.7)",
+    "rgba(255, 159, 64, 0.7)",
+    "rgba(199, 199, 199, 0.7)",
+  ]
+
   // Colores adaptados para modo oscuro/claro
   const incomeColor = isDark ? "rgba(59, 130, 246, 0.8)" : "rgba(59, 130, 246, 0.7)"
   const incomeBorderColor = isDark ? "rgb(59, 130, 246)" : "rgb(59, 130, 246)"
   const expenseColor = isDark ? "rgba(239, 68, 68, 0.8)" : "rgba(239, 68, 68, 0.7)"
   const expenseBorderColor = isDark ? "rgb(239, 68, 68)" : "rgb(239, 68, 68)"
 
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="bg-gradient-to-r from-primary/20 to-primary/10 dark:from-primary/30 dark:to-primary/20 rounded-lg p-6 text-foreground shadow-lg animate-pulse">
+          <div className="h-6 w-48 bg-primary/30 rounded mb-2"></div>
+          <div className="h-4 w-64 bg-primary/20 rounded"></div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Card key={i} className="border-l-4 border-l-gray-300 shadow-md animate-pulse">
+              <CardHeader className="pb-2">
+                <div className="flex justify-between">
+                  <div className="h-4 w-24 bg-gray-200 dark:bg-gray-700 rounded"></div>
+                  <div className="h-4 w-4 bg-gray-200 dark:bg-gray-700 rounded-full"></div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="h-6 w-32 bg-gray-300 dark:bg-gray-600 rounded mb-2"></div>
+                <div className="h-3 w-20 bg-gray-200 dark:bg-gray-700 rounded"></div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        <Card className="shadow-md">
+          <CardHeader className="bg-muted/30 dark:bg-muted/10">
+            <div className="h-5 w-48 bg-gray-200 dark:bg-gray-700 rounded mb-2"></div>
+            <div className="h-4 w-64 bg-gray-100 dark:bg-gray-800 rounded"></div>
+          </CardHeader>
+          <CardContent className="p-6">
+            <ChartSkeleton height={300} />
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Card className="w-full max-w-md border-red-200 dark:border-red-900">
+          <CardHeader className="bg-red-50 dark:bg-red-900/20">
+            <CardTitle className="text-red-700 dark:text-red-300">Error</CardTitle>
+            <CardDescription>No se pudieron cargar los datos del dashboard</CardDescription>
+          </CardHeader>
+          <CardContent className="pt-4">
+            <p className="text-sm text-gray-700 dark:text-gray-300">{error}</p>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
-      <SupabaseStatus />
       <motion.div
         className="bg-gradient-to-r from-primary/20 to-primary/10 dark:from-primary/30 dark:to-primary/20 rounded-lg p-6 text-foreground shadow-lg"
         initial={{ opacity: 0, y: -20 }}
@@ -149,37 +267,73 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      <Card className="shadow-md">
-        <CardHeader className="bg-muted/30 dark:bg-muted/10">
-          <CardTitle>Ingresos vs Gastos (Últimos 7 días)</CardTitle>
-          <CardDescription>Comparativa de ingresos y gastos diarios</CardDescription>
-        </CardHeader>
-        <CardContent className="p-6">
-          <div className="h-[300px]">
-            <BarChart
-              data={{
-                labels: dayLabels,
-                datasets: [
-                  {
-                    label: "Ingresos",
-                    data: dailyInvoiceData,
-                    backgroundColor: incomeColor,
-                    borderColor: incomeBorderColor,
-                    borderWidth: 1,
-                  },
-                  {
-                    label: "Gastos",
-                    data: dailyExpenseData,
-                    backgroundColor: expenseColor,
-                    borderColor: expenseBorderColor,
-                    borderWidth: 1,
-                  },
-                ],
-              }}
-            />
-          </div>
-        </CardContent>
-      </Card>
+      <ErrorBoundary>
+        <Card className="shadow-md">
+          <CardHeader className="bg-muted/30 dark:bg-muted/10">
+            <CardTitle>Ingresos vs Gastos (Últimos 7 días)</CardTitle>
+            <CardDescription>Comparativa de ingresos y gastos diarios</CardDescription>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="h-[300px]">
+              {dailyInvoiceData.some((val) => val > 0) || dailyExpenseData.some((val) => val > 0) ? (
+                <BarChart
+                  data={{
+                    labels: dayLabels,
+                    datasets: [
+                      {
+                        label: "Ingresos",
+                        data: dailyInvoiceData,
+                        backgroundColor: incomeColor,
+                        borderColor: incomeBorderColor,
+                        borderWidth: 1,
+                      },
+                      {
+                        label: "Gastos",
+                        data: dailyExpenseData,
+                        backgroundColor: expenseColor,
+                        borderColor: expenseBorderColor,
+                        borderWidth: 1,
+                      },
+                    ],
+                  }}
+                />
+              ) : (
+                <NoData message="No hay datos de ingresos o gastos para mostrar en este período" />
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </ErrorBoundary>
+
+      <ErrorBoundary>
+        <Card className="shadow-md">
+          <CardHeader className="bg-muted/30 dark:bg-muted/10">
+            <CardTitle>Distribución de Gastos por Categoría</CardTitle>
+            <CardDescription>Análisis de gastos por categoría</CardDescription>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="h-[300px]">
+              {categoryData.length > 0 && categoryData.some((val) => val > 0) ? (
+                <PieChart
+                  data={{
+                    labels: categoryLabels,
+                    datasets: [
+                      {
+                        label: "Gastos por Categoría",
+                        data: categoryData,
+                        backgroundColor: categoryColors.slice(0, categoryLabels.length),
+                        borderWidth: 1,
+                      },
+                    ],
+                  }}
+                />
+              ) : (
+                <NoData message="No hay datos de categorías de gastos para mostrar" />
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </ErrorBoundary>
 
       <Tabs defaultValue="7days" className="space-y-4">
         <TabsList className="bg-muted/30 dark:bg-muted/10 p-1">

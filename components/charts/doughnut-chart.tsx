@@ -6,16 +6,16 @@ import { useTheme } from "next-themes"
 
 Chart.register(...registerables)
 
-interface LineChartProps {
+interface DoughnutChartProps {
   data: {
     labels: string[]
     datasets: {
       label: string
       data: number[]
-      backgroundColor?: string
-      borderColor: string
-      tension?: number
-      fill?: boolean
+      backgroundColor: string[]
+      borderColor?: string[]
+      borderWidth?: number
+      cutout?: string | number
     }[]
   }
   title?: string
@@ -23,7 +23,7 @@ interface LineChartProps {
   options?: Partial<ChartOptions>
 }
 
-export function LineChart({ data, title, height = 300, options = {} }: LineChartProps) {
+export function DoughnutChart({ data, title, height = 300, options = {} }: DoughnutChartProps) {
   const chartRef = useRef<HTMLCanvasElement>(null)
   const chartInstance = useRef<Chart | null>(null)
   const { resolvedTheme } = useTheme()
@@ -47,7 +47,6 @@ export function LineChart({ data, title, height = 300, options = {} }: LineChart
     if (!ctx) return
 
     // Ajustar colores para modo oscuro
-    const gridColor = isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)"
     const textColor = isDark ? "rgba(255, 255, 255, 0.7)" : "rgba(0, 0, 0, 0.7)"
 
     // Clonar los datos para no modificar los originales
@@ -55,13 +54,17 @@ export function LineChart({ data, title, height = 300, options = {} }: LineChart
       labels: [...data.labels],
       datasets: data.datasets.map((dataset) => ({
         ...dataset,
-        // Ajustar backgroundColor para modo oscuro
-        backgroundColor:
-          dataset.backgroundColor && dataset.backgroundColor.includes("rgba")
-            ? isDark
-              ? dataset.backgroundColor.replace(/rgba$$(\d+,\s*\d+,\s*\d+,\s*)[\d.]+$$/, "rgba($1 0.2)")
-              : dataset.backgroundColor
-            : dataset.backgroundColor,
+        // Ajustar borderColor para modo oscuro
+        borderColor: dataset.borderColor || (isDark ? "rgba(0, 0, 0, 0.2)" : "rgba(255, 255, 255, 0.8)"),
+        // Aumentar la opacidad de los colores en modo oscuro
+        backgroundColor: isDark
+          ? dataset.backgroundColor.map((color) => {
+              if (color.includes("rgba")) {
+                return color.replace(/rgba$$(\d+,\s*\d+,\s*\d+,\s*)[\d.]+$$/, "rgba($1 0.8)")
+              }
+              return color
+            })
+          : dataset.backgroundColor,
       })),
     }
 
@@ -93,42 +96,25 @@ export function LineChart({ data, title, height = 300, options = {} }: LineChart
           backgroundColor: isDark ? "rgba(0, 0, 0, 0.8)" : "rgba(255, 255, 255, 0.8)",
           titleColor: isDark ? "rgba(255, 255, 255, 0.9)" : "rgba(0, 0, 0, 0.9)",
           bodyColor: isDark ? "rgba(255, 255, 255, 0.9)" : "rgba(0, 0, 0, 0.9)",
-          borderColor: gridColor,
+          borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)",
           borderWidth: 1,
-        },
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          grid: {
-            color: gridColor,
-          },
-          ticks: {
-            color: textColor,
-          },
-        },
-        x: {
-          grid: {
-            display: false,
-          },
-          ticks: {
-            color: textColor,
-          },
         },
       },
       animation: {
         duration: 1000,
+        animateRotate: true,
+        animateScale: true,
       },
     }
 
     try {
       chartInstance.current = new Chart(ctx, {
-        type: "line",
+        type: "doughnut",
         data: modifiedData,
         options: { ...defaultOptions, ...options },
       })
     } catch (error) {
-      console.error("Error al crear gráfico de líneas:", error)
+      console.error("Error al crear gráfico de dona:", error)
     }
 
     return () => {

@@ -1,6 +1,5 @@
 "use client"
 
-import { CardFooter } from "@/components/ui/card"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -8,14 +7,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   DropdownMenu,
@@ -32,37 +23,40 @@ import { AlertCircle, ChevronDown, Download, Printer, RefreshCw, Send } from "lu
 import { format, startOfMonth, endOfMonth } from "date-fns"
 import { es } from "date-fns/locale"
 import { exportToPDF, printElement } from "@/lib/pdf-utils"
-import { useToast } from "@/hooks/use-toast"
-import { createClient } from "@/lib/supabase-client"
+import { useToast } from "@/components/ui/use-toast"
+import { createClient } from "@supabase/supabase-js"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+
+// Tipos para el reporte
+interface Supplier {
+  id: string
+  name: string
+  rnc: string
+}
 
 interface Expense {
   id: string
+  userId: string
   date: Date | string
-  supplier: {
-    id: string
-    name: string
-    rnc: string
-  }
+  supplier?: Supplier
+  description: string
+  amount: number
+  category: string
+  documentType: string
   ncf: string
   ncfModified?: string
-  description: string
-  category: string
-  amount: number
-  itbisIncluded: boolean
-  hasItbis: boolean
-  itbisAmount?: number
-  baseAmount?: number
+  itbisIncluded?: boolean
   paymentMethod: string
   status: "paid" | "pending" | "cancelled"
-  docType: string
+  createdAt: Date | string
+  updatedAt?: Date | string
 }
 
 interface Report606Entry {
   line: number
   date: string
   rnc: string
-  supplierName: string
+  supplierName?: string
   docType: string
   ncf: string
   ncfModified: string
@@ -72,19 +66,20 @@ interface Report606Entry {
   itbisPercibido?: number
   isr?: number
   paymentMethod: string
+  totalAmount: number
 }
 
 interface Report606Summary {
-  period: string
-  startDate: Date
-  endDate: Date
   totalRecords: number
-  totalAmount: number
   totalBaseAmount: number
   totalItbisAmount: number
   totalItbisRetenido?: number
   totalItbisPercibido?: number
   totalIsr?: number
+  totalAmount: number
+  period: string
+  startDate: Date
+  endDate: Date
 }
 
 interface FilterOptions {
@@ -110,70 +105,214 @@ interface DGIICredentials {
   rnc: string
 }
 
-// Interfaces para los datos de Supabase
-interface SupabaseCategory {
-  name: string
+// Constantes
+const ITBIS_RATE = 0.18 // 18% tasa de ITBIS en República Dominicana
+
+// Funciones auxiliares
+function extractBaseAndItbis(
+  totalAmount: number,
+  itbisIncluded = true,
+  hasItbis = true,
+): { baseAmount: number; itbisAmount: number } {
+  if (!hasItbis) {
+    return {
+      baseAmount: totalAmount,
+      itbisAmount: 0,
+    }
+  }
+
+  if (itbisIncluded) {
+    // Si el ITBIS está incluido en el monto total, extraerlo
+    // Fórmula: baseAmount = totalAmount / (1 + ITBIS_RATE)
+    const baseAmount = +(totalAmount / (1 + ITBIS_RATE)).toFixed(2)
+    const itbisAmount = +(totalAmount - baseAmount).toFixed(2)
+    return { baseAmount, itbisAmount }
+  } else {
+    // Si el ITBIS no está incluido, calcularlo
+    // Fórmula: itbisAmount = baseAmount * ITBIS_RATE
+    const baseAmount = totalAmount
+    const itbisAmount = +(baseAmount * ITBIS_RATE).toFixed(2)
+    return { baseAmount, itbisAmount }
+  }
 }
 
-interface SupabaseDocType {
-  name: string
+function isItbisApplicable(category: string): boolean {
+  const itbisCategories = [
+    "Bienes",
+    "Servicios",
+    "Alquileres",
+    "Importaciones",
+    "Telecomunicaciones",
+    "Electricidad",
+    "Agua",
+  ]
+
+  return itbisCategories.includes(category)
 }
 
-interface SupabasePaymentMethod {
-  name: string
+function getDocumentTypeCode(docType: string): string {
+  const docTypes: Record<string, string> = {
+    Factura: "01",
+    "Factura de Consumo Electrónica": "02",
+    "Nota de Débito": "03",
+    "Nota de Crédito": "04",
+    "Comprobante de Compras": "11",
+    "Registro Único de Ingresos": "12",
+    "Registro de Proveedores Informales": "13",
+    "Registro de Gastos Menores": "14",
+    "Comprobante de Compras al Exterior": "15",
+    "Comprobante Gubernamental": "16",
+    "Comprobante para Exportaciones": "17",
+    "Comprobante para Pagos al Exterior": "18",
+  }
+
+  return docTypes[docType] || "01"
 }
 
-interface SupabaseSupplier {
-  id: string
-  name: string
-  rnc: string
+function getPaymentMethodCode(method: string): string {
+  const methods: Record<string, string> = {
+    Efectivo: "01",
+    "Cheques/Transferencias/Depósito": "02",
+    "Tarjeta Crédito/Débito": "03",
+    "Compra a Crédito": "04",
+    Permuta: "05",
+    "Nota de Crédito": "06",
+    Mixto: "07",
+  }
+
+  return methods[method] || "01"
 }
 
-interface SupabaseExpense {
-  id: string
-  date: string
-  description: string | null
-  amount: number
-  itbis_included: boolean
-  has_itbis: boolean
-  payment_method: string
-  status: "paid" | "pending" | "cancelled"
-  doc_type: string
-  ncf: string | null
-  ncf_modified: string | null
-  category: string
-  supplier_id: string
-  suppliers: {
-    id: string
-    name: string
-    rnc: string
-  } | null
+// Funciones para convertir datos
+function convertExpensesToReport606(expenses: Expense[]): Report606Entry[] {
+  return expenses.map((expense, index) => {
+    const hasItbis = isItbisApplicable(expense.category)
+    const { baseAmount, itbisAmount } = extractBaseAndItbis(
+      expense.amount,
+      expense.itbisIncluded !== false, // Por defecto true si no se especifica
+      hasItbis,
+    )
+
+    const docType = expense.documentType ? getDocumentTypeCode(expense.documentType) : "01"
+    const paymentMethod = expense.paymentMethod ? getPaymentMethodCode(expense.paymentMethod) : "01"
+
+    return {
+      line: index + 1,
+      date: typeof expense.date === "string" ? expense.date : format(expense.date, "yyyy-MM-dd"),
+      rnc: expense.supplier?.rnc || "-",
+      supplierName: expense.supplier?.name || "-",
+      docType,
+      ncf: expense.ncf || "-",
+      ncfModified: expense.ncfModified || "-",
+      baseAmount,
+      itbisAmount,
+      itbisRetenido: 0, // Por defecto 0, se puede personalizar según necesidad
+      itbisPercibido: 0, // Por defecto 0, se puede personalizar según necesidad
+      isr: 0, // Por defecto 0, se puede personalizar según necesidad
+      paymentMethod,
+      totalAmount: baseAmount + itbisAmount,
+    }
+  })
 }
 
-// Mapeo de tipos de documentos para el formato 606
-const docTypeMapping: Record<string, string> = {
-  Factura: "01",
-  "Nota de Débito": "02",
-  "Nota de Crédito": "03",
-  "Comprobante de Compras": "04",
-  "Registro de Proveedores Informales": "11",
-  "Registro Único de Ingresos": "12",
-  "Comprobante de Gastos Menores": "13",
-  "Comprobante de Regímenes Especiales": "14",
-  "Comprobante Gubernamental": "15",
+function calculateReport606Summary(
+  entries: Report606Entry[],
+  period: string,
+  startDate: Date,
+  endDate: Date,
+): Report606Summary {
+  const totalBaseAmount = entries.reduce((sum, entry) => sum + entry.baseAmount, 0)
+  const totalItbisAmount = entries.reduce((sum, entry) => sum + entry.itbisAmount, 0)
+  const totalItbisRetenido = entries.reduce((sum, entry) => sum + (entry.itbisRetenido || 0), 0)
+  const totalItbisPercibido = entries.reduce((sum, entry) => sum + (entry.itbisPercibido || 0), 0)
+  const totalIsr = entries.reduce((sum, entry) => sum + (entry.isr || 0), 0)
+
+  return {
+    totalRecords: entries.length,
+    totalBaseAmount,
+    totalItbisAmount,
+    totalItbisRetenido,
+    totalItbisPercibido,
+    totalIsr,
+    totalAmount: totalBaseAmount + totalItbisAmount,
+    period,
+    startDate,
+    endDate,
+  }
 }
 
-// Mapeo de métodos de pago para el formato 606
-const paymentMethodMapping: Record<string, string> = {
-  Efectivo: "01",
-  "Cheques/Transferencias/Depósito": "02",
-  "Tarjeta Crédito/Débito": "03",
-  "Compra a Crédito": "04",
-  Permuta: "05",
-  "Nota de Crédito": "06",
-  Mixto: "07",
+async function getExpensesByDateRange(
+  userId: string,
+  startDate: Date,
+  endDate: Date,
+  filters: FilterOptions,
+): Promise<Expense[]> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+  const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+  let query = supabase
+    .from("expenses")
+    .select(`
+      id, user_id, date, supplier_id, description, amount, category, document_type, ncf, ncf_modified, itbis_included, payment_method, status, created_at, updated_at,
+      suppliers (
+        id, name, rnc
+      )
+    `)
+    .eq("user_id", userId)
+    .gte("date", format(startDate, "yyyy-MM-dd"))
+    .lte("date", format(endDate, "yyyy-MM-dd"))
+
+  if (filters.categories.length > 0) {
+    query = query.in("category", filters.categories)
+  }
+
+  if (filters.documentTypes.length > 0) {
+    query = query.in("document_type", filters.documentTypes)
+  }
+
+  if (filters.paymentMethods.length > 0) {
+    query = query.in("payment_method", filters.paymentMethods)
+  }
+
+  if (filters.status.length > 0) {
+    query = query.in("status", filters.status)
+  }
+
+  if (filters.suppliers.length > 0) {
+    query = query.in("supplier_id", filters.suppliers)
+  }
+
+  const { data, error } = await query
+
+  if (error) {
+    console.error("Error fetching expenses:", error)
+    return []
+  }
+
+  // Map the data to the Expense interface
+  const expenses: Expense[] = data.map((item: any) => ({
+    id: item.id,
+    userId: item.user_id,
+    date: item.date,
+    supplier: item.suppliers,
+    description: item.description,
+    amount: item.amount,
+    category: item.category,
+    documentType: item.document_type,
+    ncf: item.ncf,
+    ncfModified: item.ncf_modified,
+    itbisIncluded: item.itbis_included,
+    paymentMethod: item.payment_method,
+    status: item.status,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  }))
+
+  return expenses
 }
 
+// Componente principal
 export function Report606() {
   // Estado para el período seleccionado y fechas
   const [selectedPeriod, setSelectedPeriod] = useState<string>("")
@@ -269,7 +408,9 @@ export function Report606() {
     const loadAvailableFilters = async () => {
       try {
         setLoading(true)
-        const supabase = createClient()
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
+        const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+        const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
         // Obtener el usuario actual
         const {
@@ -304,7 +445,7 @@ export function Report606() {
 
         // Fetch categories, document types, and payment methods
         const categoriesPromise = fetchData("expenses", "category")
-        const documentTypesPromise = fetchData("expenses", "doc_type")
+        const documentTypesPromise = fetchData("expenses", "document_type")
         const paymentMethodsPromise = fetchData("expenses", "payment_method")
 
         // Fetch suppliers
@@ -366,7 +507,9 @@ export function Report606() {
     setError(null)
 
     try {
-      const supabase = createClient()
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+      const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
       // Obtener el usuario actual
       const {
@@ -387,152 +530,28 @@ export function Report606() {
 
       const userId = user.id
 
-      // Formatear fechas para la consulta
-      const startDateStr = format(startDate, "yyyy-MM-dd")
-      const endDateStr = format(endDate, "yyyy-MM-dd")
-
       // Consultar gastos desde Supabase
-      let query = supabase
-        .from("expenses")
-        .select(`
-          id, 
-          date, 
-          description, 
-          amount, 
-          itbis_included, 
-          has_itbis, 
-          payment_method, 
-          status, 
-          doc_type,
-          ncf,
-          ncf_modified,
-          category,
-          supplier_id,
-          suppliers(id, name, rnc)
-        `)
-        .eq("user_id", userId)
-        .gte("date", startDateStr)
-        .lte("date", endDateStr)
-
-      // Aplicar filtros
-      if (filters.categories.length > 0) {
-        query = query.in("category", filters.categories)
-      }
-
-      if (filters.documentTypes.length > 0) {
-        query = query.in("doc_type", filters.documentTypes)
-      }
-
-      if (filters.paymentMethods.length > 0) {
-        query = query.in("payment_method", filters.paymentMethods)
-      }
-
-      if (filters.suppliers.length > 0) {
-        query = query.in("supplier_id", filters.suppliers)
-      }
-
-      if (filters.status.length > 0) {
-        query = query.in("status", filters.status)
-      }
-
-      const { data: expensesData, error: expensesError } = await query
-
-      if (expensesError) throw expensesError
+      const expensesData = await getExpensesByDateRange(userId, startDate, endDate, filters)
 
       if (!expensesData || expensesData.length === 0) {
         setExpenses([])
         setReportEntries([])
-        setReportSummary({
-          period: selectedPeriod,
-          startDate,
-          endDate,
-          totalRecords: 0,
-          totalAmount: 0,
-          totalBaseAmount: 0,
-          totalItbisAmount: 0,
-          totalItbisRetenido: 0,
-          totalItbisPercibido: 0,
-          totalIsr: 0,
+        setReportSummary(null)
+        toast({
+          title: "Sin datos",
+          description: "No hay registros para el período seleccionado.",
         })
         return
       }
 
-      // Transformar datos de la base de datos al formato de la aplicación
-      const processedExpenses: Expense[] = expensesData.map((expense: any) => ({
-        id: expense.id as string,
-        date: new Date(expense.date),
-        supplier: {
-          id: expense.suppliers?.id || "",
-          name: expense.suppliers?.name || "Proveedor Desconocido",
-          rnc: expense.suppliers?.rnc || "000000000",
-        },
-        ncf: expense.ncf || "",
-        ncfModified: expense.ncf_modified || "",
-        description: expense.description || "",
-        category: expense.category || "",
-        amount: expense.amount || 0,
-        itbisIncluded: expense.itbis_included || false,
-        hasItbis: expense.has_itbis || false,
-        paymentMethod: expense.payment_method || "",
-        status: (expense.status as "paid" | "pending" | "cancelled") || "paid",
-        docType: expense.doc_type || "",
-      }))
-
-      // Calcular montos base e ITBIS
-      const expensesWithCalculations = processedExpenses.map((expense) => {
-        if (expense.hasItbis) {
-          if (expense.itbisIncluded) {
-            // Si el ITBIS está incluido, calculamos el monto base dividiendo entre 1.18
-            const baseAmount = Number((expense.amount / 1.18).toFixed(2))
-            const itbisAmount = Number((expense.amount - baseAmount).toFixed(2))
-            return { ...expense, baseAmount, itbisAmount }
-          } else {
-            // Si el ITBIS no está incluido, el monto base es el monto original
-            const baseAmount = expense.amount
-            const itbisAmount = Number((baseAmount * 0.18).toFixed(2))
-            return { ...expense, baseAmount, itbisAmount }
-          }
-        } else {
-          // Si no tiene ITBIS, el monto base es el monto total y el ITBIS es 0
-          return { ...expense, baseAmount: expense.amount, itbisAmount: 0 }
-        }
-      })
-
-      setExpenses(expensesWithCalculations)
+      setExpenses(expensesData)
 
       // Convertir a formato 606
-      const entries: Report606Entry[] = expensesWithCalculations.map((expense, index) => ({
-        line: index + 1,
-        date: format(new Date(expense.date), "yyyy-MM-dd"),
-        rnc: expense.supplier.rnc,
-        supplierName: expense.supplier.name,
-        docType: docTypeMapping[expense.docType] || "01",
-        ncf: expense.ncf,
-        ncfModified: expense.ncfModified || "",
-        baseAmount: expense.baseAmount || 0,
-        itbisAmount: expense.itbisAmount || 0,
-        itbisRetenido: 0,
-        itbisPercibido: 0,
-        isr: 0,
-        paymentMethod: paymentMethodMapping[expense.paymentMethod] || "01",
-      }))
-
+      const entries = convertExpensesToReport606(expensesData)
       setReportEntries(entries)
 
       // Calcular resumen
-      const summary: Report606Summary = {
-        period: selectedPeriod,
-        startDate,
-        endDate,
-        totalRecords: entries.length,
-        totalAmount: entries.reduce((sum, entry) => sum + entry.baseAmount + entry.itbisAmount, 0),
-        totalBaseAmount: entries.reduce((sum, entry) => sum + entry.baseAmount, 0),
-        totalItbisAmount: entries.reduce((sum, entry) => sum + entry.itbisAmount, 0),
-        totalItbisRetenido: entries.reduce((sum, entry) => sum + (entry.itbisRetenido || 0), 0),
-        totalItbisPercibido: entries.reduce((sum, entry) => sum + (entry.itbisPercibido || 0), 0),
-        totalIsr: entries.reduce((sum, entry) => sum + (entry.isr || 0), 0),
-      }
-
+      const summary = calculateReport606Summary(entries, selectedPeriod, startDate, endDate)
       setReportSummary(summary)
 
       toast({
@@ -563,6 +582,13 @@ export function Report606() {
   // Manejar cambio de período
   const handlePeriodChange = (value: string) => {
     setSelectedPeriod(value)
+
+    // Actualizar fechas según el período seleccionado
+    const year = Number.parseInt(value.substring(0, 4))
+    const month = Number.parseInt(value.substring(4, 6)) - 1 // Meses en JS son 0-indexed
+
+    setStartDate(startOfMonth(new Date(year, month)))
+    setEndDate(endOfMonth(new Date(year, month)))
   }
 
   // Manejar cambio de filtros
@@ -1146,15 +1172,15 @@ export function Report606() {
                     />
                   </div>
 
-                  <div>
-                    <Label htmlFor="fontSize">Tamaño de Fuente</Label>
+                  <div className="space-y-2">
+                    <Label>Tamaño de Fuente</Label>
                     <Select
                       value={customization.fontSize}
                       onValueChange={(value) =>
                         handleCustomizationChange("fontSize", value as "small" | "medium" | "large")
                       }
                     >
-                      <SelectTrigger id="fontSize">
+                      <SelectTrigger>
                         <SelectValue placeholder="Tamaño de fuente" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1168,66 +1194,54 @@ export function Report606() {
               </div>
             </TabsContent>
           </Tabs>
+
+          <div className="border-t pt-4 flex justify-between items-center">
+            <div>
+              {reportSummary && (
+                <p className="text-sm font-medium">
+                  Total:{" "}
+                  {new Intl.NumberFormat("es-DO", {
+                    style: "currency",
+                    currency: "DOP",
+                  }).format(reportSummary.totalAmount)}{" "}
+                  | Base:{" "}
+                  {new Intl.NumberFormat("es-DO", {
+                    style: "currency",
+                    currency: "DOP",
+                  }).format(reportSummary.totalBaseAmount)}{" "}
+                  | ITBIS:{" "}
+                  {new Intl.NumberFormat("es-DO", {
+                    style: "currency",
+                    currency: "DOP",
+                  }).format(reportSummary.totalItbisAmount)}
+                </p>
+              )}
+            </div>
+            <div className="flex space-x-2">
+              <Button variant="outline" onClick={handlePrint} disabled={loading || !reportEntries.length}>
+                <Printer className="mr-2 h-4 w-4" />
+                Imprimir
+              </Button>
+              <Button onClick={handleExportPDF} disabled={loading || !reportEntries.length}>
+                <Download className="mr-2 h-4 w-4" />
+                PDF
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="p-0">
-          <div
-            id="report-606-content"
-            ref={reportRef}
-            className={`p-4 ${customization.compactMode ? "print:text-xs" : "print:text-sm"}`}
-          >
-            {renderReportHeader()}
-            {renderReportTable()}
-          </div>
-        </CardContent>
-        <CardFooter className="flex justify-between border-t p-4">
-          <div className="text-sm text-muted-foreground">
-            {reportSummary && (
-              <>
-                Total:{" "}
-                {new Intl.NumberFormat("es-DO", {
-                  style: "currency",
-                  currency: "DOP",
-                }).format(reportSummary.totalAmount)}{" "}
-                | Base:{" "}
-                {new Intl.NumberFormat("es-DO", {
-                  style: "currency",
-                  currency: "DOP",
-                }).format(reportSummary.totalBaseAmount)}{" "}
-                | ITBIS:{" "}
-                {new Intl.NumberFormat("es-DO", {
-                  style: "currency",
-                  currency: "DOP",
-                }).format(reportSummary.totalItbisAmount)}
-              </>
-            )}
-          </div>
-          <div className="flex space-x-2">
-            <Button variant="outline" size="sm" onClick={handlePrint}>
-              <Printer className="mr-2 h-4 w-4" />
-              Imprimir
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleExportPDF}>
-              <Download className="mr-2 h-4 w-4" />
-              PDF
-            </Button>
-          </div>
-        </CardFooter>
-      </Card>
-
-      {/* Diálogo para enviar a DGII */}
-      <Dialog open={sendDialogOpen} onOpenChange={setSendDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Enviar Reporte a la DGII</DialogTitle>
-            <DialogDescription>
+      {/* Diálogo para enviar a la DGII */}
+      {sendDialogOpen && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Enviar Reporte a la DGII</CardTitle>
+            <CardDescription>
               Ingrese sus credenciales de la Oficina Virtual de la DGII para enviar el reporte.
-            </DialogDescription>
-          </DialogHeader>
+            </CardDescription>
+          </CardHeader>
 
-          <div className="space-y-4 py-4">
+          <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="dgii-rnc">RNC/Cédula</Label>
               <Input
@@ -1259,23 +1273,17 @@ export function Report606() {
               />
             </div>
 
-            {sendResult && (
-              <div
-                className={`p-3 rounded-md ${sendResult.success ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}
-              >
-                {sendResult.message}
-              </div>
-            )}
-          </div>
+            {sendResult && <Alert variant={sendResult.success ? "success" : "destructive"}>{sendResult.message}</Alert>}
+          </CardContent>
 
-          <DialogFooter>
+          <CardContent className="flex justify-end space-x-2 border-t pt-4">
             <Button variant="outline" onClick={() => setSendDialogOpen(false)}>
               Cancelar
             </Button>
             <Button onClick={handleSendToDGII} disabled={sendingReport}>
               {sendingReport ? (
                 <>
-                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
                   Enviando...
                 </>
               ) : (
@@ -1285,32 +1293,9 @@ export function Report606() {
                 </>
               )}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Estilos para impresión */}
-      <style jsx global>{`
-       @media print {
-         body * {
-           visibility: hidden;
-         }
-         #report-606-content,
-         #report-606-content * {
-           visibility: visible;
-         }
-         #report-606-content {
-           position: absolute;
-           left: 0;
-           top: 0;
-           width: 100%;
-         }
-         .printing {
-           background-color: white !important;
-           color: black !important;
-         }
-       }
-     `}</style>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }
